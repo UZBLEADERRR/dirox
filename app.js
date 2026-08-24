@@ -3,7 +3,7 @@ const state={user:JSON.parse(localStorage.getItem('dirox.user')||'null'),project
 const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 const authHeaders=()=>state.user?.access_token?{Authorization:`Bearer ${state.user.access_token}`,'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 function toast(t){const x=$('#toast');x.textContent=t;x.classList.add('show');setTimeout(()=>x.classList.remove('show'),2400)}
-function show(id){['authView','dashboardView','workspaceView','adminView'].forEach(x=>$('#'+x).hidden=x!==id);document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.nav===id))}
+function show(id){['authView','dashboardView','workspaceView','adminView'].forEach(x=>$('#'+x).hidden=x!==id);const nav=$('.bottom-nav');if(nav)nav.hidden=id==='authView';document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.nav===id))}
 function save(){localStorage.setItem('dirox.projects',JSON.stringify(state.projects));if(state.user)localStorage.setItem('dirox.user',JSON.stringify(state.user))}
 async function syncProjects(){if(!API_URL||!state.user?.access_token)return;try{const r=await fetch(API_URL+'/projects',{headers:authHeaders()});if(r.ok){state.projects=await r.json();save();render()}}catch{} }
 async function checkAdmin(){if(!API_URL||!state.user?.access_token)return;try{const r=await fetch(API_URL+'/admin/me',{headers:authHeaders()});state.admin=r.ok&&(await r.json()).admin;$('#adminNav').hidden=!state.admin}catch{state.admin=false}}
