@@ -16,6 +16,7 @@ import { notificationRoutes } from './modules/notifications/routes.js';
 import { billingRoutes } from './modules/billing/routes.js';
 import { projectRoutes } from './modules/projects/routes.js';
 import { githubRoutes } from './modules/projects/github.routes.js';
+import { adminRoutes } from './modules/admin/routes.js';
 
 export function registerRoutes(router) {
   const api = new Router();
@@ -37,6 +38,7 @@ export function registerRoutes(router) {
   api.use('/github', githubRoutes());
   api.use('/notifications', notificationRoutes());
   api.use('/billing', billingRoutes());
+  api.use('/admin', adminRoutes());
 
   router.use('/api', api);
   return router;
