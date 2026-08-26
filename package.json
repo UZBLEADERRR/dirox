@@ -3,13 +3,16 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "DiroxCode — Your AI Software Engineer. Autonomous, token-efficient AI software engineering platform.",
-  "engines": { "node": ">=20" },
+  "description": "DiroxCode \u2014 Your AI Software Engineer. Autonomous, token-efficient AI software engineering platform.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/server.js && node scripts/check-syntax.js",
-    "db:print": "node scripts/print-migrations.js"
+    "check": "node scripts/check-syntax.js",
+    "db:print": "node scripts/print-migrations.js",
+    "test:db": "scripts/verify-migrations.sh ${PGARGS:--h localhost -U postgres} && psql ${PGARGS:--h localhost -U postgres} -f scripts/verify-rls.sql"
   }
 }

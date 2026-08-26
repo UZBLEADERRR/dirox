@@ -47,6 +47,16 @@ language sql stable security definer set search_path = public as $$
   select org_id from projects where id = target_project
 $$;
 
+create table if not exists project_members (
+  project_id uuid not null references projects(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  role       text not null default 'member' check (role in ('owner','admin','member','viewer')),
+  created_at timestamptz not null default now(),
+  primary key (project_id, user_id)
+);
+
+create index if not exists project_members_user_idx on project_members (user_id);
+
 create or replace function app.can_read_project(target_project uuid, uid uuid default auth.uid()) returns boolean
 language sql stable security definer set search_path = public as $$
   select app.is_org_member(app.project_org(target_project), uid)
@@ -59,16 +69,6 @@ language sql stable security definer set search_path = public as $$
       or exists (select 1 from project_members pm
                  where pm.project_id = target_project and pm.user_id = uid and pm.role in ('owner','admin','member'))
 $$;
-
-create table if not exists project_members (
-  project_id uuid not null references projects(id) on delete cascade,
-  user_id    uuid not null references auth.users(id) on delete cascade,
-  role       text not null default 'member' check (role in ('owner','admin','member','viewer')),
-  created_at timestamptz not null default now(),
-  primary key (project_id, user_id)
-);
-
-create index if not exists project_members_user_idx on project_members (user_id);
 
 -- ─── repositories & branches ────────────────────────────────────────────────
 create table if not exists repositories (
