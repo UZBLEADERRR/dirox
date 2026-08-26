@@ -26,10 +26,14 @@ export function endpoint(provider) {
 export function buildRequest({ model, messages, tools, temperature, maxTokens, stream, reasoningEffort, stop, cacheSystem }) {
   const system = [];
   const conversation = [];
+  let boundaryIndex = -1;
 
   for (const message of messages) {
     if (message.role === 'system') {
       system.push({ type: 'text', text: String(message.content || '') });
+      // The caller marks the end of the stable prefix. System blocks after it
+      // are volatile and must stay outside the cached region.
+      if (message.cacheBoundary) boundaryIndex = system.length - 1;
       continue;
     }
     if (message.role === 'tool') {
@@ -59,10 +63,11 @@ export function buildRequest({ model, messages, tools, temperature, maxTokens, s
     conversation.push({ role: message.role === 'assistant' ? 'assistant' : 'user', content: String(message.content ?? '') });
   }
 
-  // Mark the last system block cacheable: the system layer is the part that
-  // repeats verbatim across turns, so it is where caching pays off.
+  // Mark the end of the stable prefix cacheable. Tools and the system layer are
+  // what repeat verbatim across the turns of a task, so that is where caching
+  // pays off; a caller that marks no boundary gets the old behaviour.
   if (cacheSystem && model.supports_prompt_cache && system.length) {
-    system[system.length - 1].cache_control = { type: 'ephemeral' };
+    system[boundaryIndex >= 0 ? boundaryIndex : system.length - 1].cache_control = { type: 'ephemeral' };
   }
 
   const body = {

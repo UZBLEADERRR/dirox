@@ -1,7 +1,12 @@
 /**
  * The agent loop.
  *
- *   classify -> plan -> retrieve -> model -> tools -> observe -> validate -> report
+ *   intent -> classify -> plan -> retrieve -> model -> tools -> observe -> validate -> report
+ *
+ * Intent comes first and costs nothing. It decides how much of the pipeline
+ * runs at all: a greeting takes the direct path — no plan, no checkpoint, no
+ * retrieval, no tool schemas — while real work takes the whole loop. Complexity
+ * routing then decides *which model*; intent decided *how much to send it*.
  *
  * Everything that makes this safe rather than merely clever lives here:
  * iteration limits, loop detection, budget pressure, escalation only after a
@@ -12,6 +17,7 @@
 
 import { complete } from '../ai/gateway.js';
 import { classify, classifierPrompt, parseClassification, route, escalate } from '../ai/router.js';
+import { classifyIntent, intentPrompt, parseIntent, shouldVerifyIntent } from './intent.js';
 import { systemSetting } from '../ai/catalog.js';
 import { assembleContext } from '../context/engine.js';
 import { TokenBudget, defaultBudgetFor } from '../context/budget.js';
@@ -25,7 +31,7 @@ import { logger } from '../core/logger.js';
 import { runtimeStats } from '../modules/observability/audit.js';
 
 const PHASES = {
-  CLASSIFY: 'classify', PLAN: 'plan', RETRIEVE: 'retrieve', MODEL: 'model',
+  INTENT: 'intent', CLASSIFY: 'classify', PLAN: 'plan', RETRIEVE: 'retrieve', MODEL: 'model',
   TOOL: 'tool', OBSERVE: 'observe', VALIDATE: 'validate', REVIEW: 'review',
   CHECKPOINT: 'checkpoint', FINALIZE: 'finalize'
 };
@@ -103,9 +109,128 @@ export async function runTask(task, options) {
     if (signal?.aborted) throw cancelled('The task was stopped');
   };
 
+  /**
+   * The direct path, taken when the intent router says there is nothing to
+   * look up.
+   *
+   * This is not a degraded version of the loop — it is the whole response for
+   * a conversational turn. It skips the complexity classifier, the plan, the
+   * restore point, retrieval and every tool schema, because none of them can
+   * improve the answer to "hello" and together they cost thousands of tokens.
+   */
+  const respondDirectly = async profile => {
+    budget.level = profile.level || 'level0';
+    if (!task.budget_micros || Number(task.budget_micros) <= 0) {
+      budget.budgetMicros = await defaultBudgetFor(budget.level);
+    }
+
+    const chatRoute = await route({
+      category: profile.category,
+      level: profile.level,
+      allowedTiers: options.allowedTiers,
+      preferredModelId: options.preferredModelId,
+      requireTools: false
+    });
+
+    emit('model', { name: chatRoute.model.name, level: chatRoute.level, category: chatRoute.category });
+    await updateTask(task.id, {
+      status: 'running',
+      complexity: budget.level,
+      primary_model_id: chatRoute.model.id,
+      budget_micros: budget.budgetMicros,
+      started_at: task.started_at || new Date().toISOString()
+    });
+
+    const history = await recentTurns(task.conversation_id, profile.historyTurns);
+
+    const answer = await step(PHASES.MODEL, 'Replying', async () => {
+      const context = await assembleContext({
+        orgId: auth.org.id,
+        userId: auth.user.id,
+        objective: task.objective,
+        mode: task.mode,
+        profile,
+        history,
+        availableTools: []
+      });
+
+      const result = await complete({
+        messages: context.messages,
+        routeResult: chatRoute,
+        maxTokens: profile.maxOutputTokens,
+        signal,
+        context: { orgId: auth.org.id, userId: auth.user.id, projectId: project?.id, taskId: task.id }
+      });
+
+      budget.record(result.costMicros, 'chat');
+      emit('cost', budget.toJSON());
+
+      return {
+        summary: `${context.tokens} input tokens`,
+        detail: { inputTokens: context.tokens, intent: profile.intent },
+        usage: result.usage,
+        value: result.text
+      };
+    }).then(result => result.value);
+
+    const result = {
+      summary: answer || 'No reply was produced.',
+      changedFiles: [],
+      validation: null,
+      review: null,
+      plan: null,
+      model: chatRoute.model.name,
+      escalations: 0,
+      intent: profile.intent
+    };
+
+    await updateTask(task.id, {
+      status: 'completed',
+      finished_at: new Date().toISOString(),
+      duration_ms: task.started_at ? Date.now() - new Date(task.started_at).getTime() : null,
+      spent_micros: budget.spentMicros,
+      iterations: state.stepIndex,
+      changed_files: [],
+      result
+    });
+
+    emit('done', { ...result, budget: budget.toJSON() });
+    return { status: 'completed', ...result, budget: budget.toJSON(), iterations: state.stepIndex };
+  };
+
   runtimeStats.agentRun();
 
   try {
+    // ── 0. intent ────────────────────────────────────────────────────────────
+    //
+    // Before anything is assembled, decide how much this request is allowed to
+    // cost. The heuristic is free; a model call to settle it happens only when
+    // being wrong would cost more than asking.
+    let intent = classifyIntent({
+      text: task.objective,
+      mode: task.mode,
+      hasProject: Boolean(project),
+      hasAttachment: Boolean(task.attachments?.length),
+      conversationTurns: Number(task.iterations || 0)
+    });
+
+    if (shouldVerifyIntent(intent) && budget.pressure === 'comfortable') {
+      const verified = await verifyIntent(intent, task, { auth, project, signal, allowedTiers: options.allowedTiers, budget })
+        .catch(() => intent);
+      intent = verified;
+    }
+
+    emit('intent', { intent: intent.intent, reason: intent.reason, confidence: intent.confidence });
+
+    // ── the direct path ──
+    //
+    // "Salom" needs one sentence of system prompt and the message itself. No
+    // plan, no restore point, no retrieval, no tool schemas — roughly forty
+    // tokens instead of four thousand, on the most common message there is.
+    if (intent.intent === 'chat') {
+      return await respondDirectly(intent.profile);
+    }
+
     // ── 1. classify ──────────────────────────────────────────────────────────
     let classification = classify({
       text: task.objective,
@@ -157,14 +282,15 @@ export async function runTask(task, options) {
       level: classification.level,
       allowedTiers: options.allowedTiers,
       preferredModelId: options.preferredModelId,
-      requireTools: task.mode !== 'ask'
+      requireTools: intent.intent === 'code' && task.mode !== 'ask'
     });
 
     emit('model', { name: currentRoute.model.name, level: currentRoute.level, category: currentRoute.category });
     await updateTask(task.id, { primary_model_id: currentRoute.model.id });
 
     // ── 3. checkpoint before the first change ────────────────────────────────
-    if (project && ['agent', 'autopilot', 'edit', 'debug'].includes(task.mode)) {
+    // A read-only intent cannot write, so there is nothing to restore.
+    if (project && intent.intent === 'code' && ['agent', 'autopilot', 'edit', 'debug'].includes(task.mode)) {
       await step(PHASES.CHECKPOINT, 'Creating a restore point', async () => {
         const checkpoint = await createCheckpoint({
           projectId: project.id, taskId: task.id, kind: 'pre_task',
@@ -178,7 +304,7 @@ export async function runTask(task, options) {
 
     // ── 4. plan, for anything non-trivial ────────────────────────────────────
     let plan = null;
-    if (classification.level !== 'level0' && task.mode !== 'ask') {
+    if (intent.intent === 'code' && classification.level !== 'level0' && task.mode !== 'ask') {
       plan = await step(PHASES.PLAN, 'Planning the work', async () => {
         const planRoute = await route({
           category: 'plan',
@@ -234,6 +360,7 @@ export async function runTask(task, options) {
 
     const tools = toolsFor({
       mode: task.mode,
+      toolset: intent.profile.toolset,
       featureFlags: options.featureFlags || {},
       hasRepository: Boolean(project),
       hasDevCommand: Boolean(project?.dev_command)
@@ -270,6 +397,7 @@ export async function runTask(task, options) {
           taskFiles: [...state.changedFiles.keys()],
           project,
           budget,
+          profile: intent.profile,
           availableTools: tools
         });
 
@@ -310,7 +438,9 @@ export async function runTask(task, options) {
           messages: context.messages,
           routeResult: currentRoute,
           tools: toolDefinitions(tools),
-          maxTokens: limits.outputTokens,
+          // The intent's ceiling and the budget's ceiling, whichever is lower.
+          // A question does not need room for a 16,000-token answer.
+          maxTokens: Math.min(limits.outputTokens, intent.profile.maxOutputTokens ?? limits.outputTokens),
           signal,
           context: { orgId: auth.org.id, userId: auth.user.id, projectId: project?.id, taskId: task.id }
         });
@@ -551,6 +681,48 @@ export async function runTask(task, options) {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Settle an uncertain intent with the cheapest model there is.
+ *
+ * Worth roughly 120 tokens. It runs only when the heuristic is unsure *and*
+ * leaning towards an expensive intent, because that is the only case where
+ * being wrong costs more than asking.
+ */
+async function verifyIntent(guess, task, { auth, project, signal, allowedTiers, budget }) {
+  const cheapRoute = await route({ category: 'classify', level: 'level0', allowedTiers });
+  const result = await complete({
+    messages: intentPrompt(task.objective),
+    routeResult: cheapRoute,
+    temperature: 0,
+    maxTokens: 20,
+    responseFormat: 'json',
+    cache: true,
+    signal,
+    context: { orgId: auth.org.id, userId: auth.user.id, projectId: project?.id, taskId: task.id }
+  });
+  budget.record(result.costMicros, 'intent');
+  return parseIntent(result.text, guess);
+}
+
+/** The last few turns of the conversation, and nothing more. */
+async function recentTurns(conversationId, limit = 4) {
+  if (!conversationId || !hasServiceRole() || limit <= 0) return [];
+  try {
+    const rows = await serviceClient().from('messages')
+      .select('role,content')
+      .eq('conversation_id', conversationId)
+      .eq('compacted', false)
+      .order('sequence', { ascending: false })
+      .limit(limit)
+      .all();
+    return rows.reverse()
+      .filter(row => row.role === 'user' || row.role === 'assistant')
+      .map(row => ({ role: row.role, content: String(row.content || '').slice(0, 2000) }));
+  } catch {
+    return [];
+  }
+}
 
 /** The objective the model sees, sharpened by the plan and what has happened. */
 function buildObjective(task, plan, state, iteration) {

@@ -24,7 +24,7 @@
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
 import { estimateTokens, estimateMessageTokens } from '../ai/pricing.js';
 import { rankFiles, buildContext, renderContext } from './retrieval.js';
-import { systemPrompt, modeGuidance } from '../agent/prompts.js';
+import { systemPrompt, modeGuidance, volatileLayer } from '../agent/prompts.js';
 import { caches, cacheKey } from '../core/cache.js';
 import { logger } from '../core/logger.js';
 
@@ -40,16 +40,44 @@ import { logger } from '../core/logger.js';
  * @param {Array}  [request.taskFiles] files already touched in this task
  * @param {object} [request.project]   the project row
  * @param {object} [request.budget]    TokenBudget, so the agent sees its constraint
+ * @param {object} [request.profile]   the intent profile — decides how much is
+ *                                     assembled at all, before any of it is built
  */
 export async function assembleContext(request) {
   const {
     projectId, orgId, objective, mode = 'agent', limits,
     history = [], toolResults = [], taskFiles = [], project = null,
-    budget = null, availableTools = []
+    budget = null, availableTools = [], profile = null
   } = request;
+
+  const tier = profile?.promptTier ?? 'full';
+  const historyTurns = profile?.historyTurns ?? limits?.historyMessages ?? 10;
+  const historyChars = profile?.historyChars ?? 0;
+  const wantsRetrieval = profile ? profile.retrieval !== false : true;
 
   const layers = [];
   let retrieval = { items: [], references: [], tokens: 0, truncated: false };
+
+  // ── the minimal path ──
+  //
+  // A greeting has nothing to look up. Everything below this point — memory
+  // loads, retrieval, the project summary — is both a database round trip and
+  // thousands of tokens, and none of it can improve the answer to "hello".
+  // Taking the decision here rather than trimming afterwards is the whole
+  // point: work not started costs nothing.
+  if (tier === 'minimal') {
+    const messages = [
+      { role: 'system', content: systemPrompt({ tier: 'minimal' }) },
+      ...compressHistory(history.slice(-historyTurns), historyTurns, historyChars),
+      { role: 'user', content: String(objective) }
+    ];
+    return {
+      messages,
+      tokens: estimateMessageTokens(messages),
+      retrieval: { files: [], references: [], contextTokens: 0, truncated: false },
+      layers: [{ name: 'system', tokens: estimateTokens(messages[0].content) }]
+    };
+  }
 
   // ── layer 1 + 2 + 3: policy, project rules, user preferences ──
   const [projectRules, userPreferences] = await Promise.all([
@@ -58,17 +86,23 @@ export async function assembleContext(request) {
   ]);
 
   const system = systemPrompt({
+    tier,
     mode,
     project,
-    projectRules: projectRules.slice(0, 12),
-    userPreferences: userPreferences.slice(0, 6),
-    budget: budget?.describe(),
+    projectRules: projectRules.slice(0, tier === 'compact' ? 5 : 12),
+    userPreferences: userPreferences.slice(0, tier === 'compact' ? 0 : 6),
     toolNames: availableTools.map(tool => tool.name)
   });
-  layers.push({ name: 'system', role: 'system', content: system, protected: true });
+
+  // The cache boundary. Everything up to and including this message repeats
+  // byte-for-byte across the turns of a task, so it is the prefix a provider
+  // can serve from its cache. Nothing volatile — not the budget, not the
+  // retrieved files — may sit above it, or the prefix changes every call and
+  // the cache never hits.
+  layers.push({ name: 'system', role: 'system', content: system, protected: true, cacheBoundary: true });
 
   // ── layer 5: repository context ──
-  if (projectId && limits?.contextTokens > 0) {
+  if (wantsRetrieval && projectId && limits?.contextTokens > 0) {
     const ranked = await rankFiles({
       projectId,
       query: `${objective}\n${taskFiles.join('\n')}`,
@@ -114,10 +148,19 @@ export async function assembleContext(request) {
 
   // ── conversation history, compressed ──
   const messages = [];
-  for (const layer of layers) messages.push({ role: layer.role, content: layer.content });
+  for (const layer of layers) {
+    const message = { role: layer.role, content: layer.content };
+    if (layer.cacheBoundary) message.cacheBoundary = true;
+    messages.push(message);
+  }
 
-  const trimmedHistory = compressHistory(history, limits?.historyMessages ?? 10);
+  const trimmedHistory = compressHistory(history, historyTurns, historyChars);
   messages.push(...trimmedHistory);
+
+  // The volatile layer travels late, below the cache boundary, precisely
+  // because it changes on every call.
+  const volatile = volatileLayer({ budget: budget?.describe(), pressure: limits?.pressure });
+  if (volatile) messages.push({ role: 'system', content: volatile });
 
   // ── layer 4: the actual request ──
   messages.push({ role: 'user', content: buildUserTurn(objective, mode) });
@@ -161,9 +204,14 @@ function buildUserTurn(objective, mode) {
  * Recent turns are kept verbatim because they carry the working state. Older
  * turns collapse into a single summary line each — enough to preserve intent
  * without re-sending code that is already in the retrieved context.
+ *
+ * `maxChars` caps each surviving turn. Counting turns alone is not a bound:
+ * one earlier message containing a pasted stack trace makes the next greeting
+ * cost more than the whole conversation before it.
  */
-export function compressHistory(history, keepRecent = 10) {
-  if (history.length <= keepRecent) return history.map(normaliseTurn);
+export function compressHistory(history, keepRecent = 10, maxChars = 0) {
+  const keep = turn => normaliseTurn(turn, maxChars);
+  if (history.length <= keepRecent) return history.map(keep);
 
   const older = history.slice(0, history.length - keepRecent);
   const recent = history.slice(-keepRecent);
@@ -179,14 +227,17 @@ export function compressHistory(history, keepRecent = 10) {
 
   return [
     { role: 'system', content: `Earlier in this conversation:\n${summary}` },
-    ...recent.map(normaliseTurn)
+    ...recent.map(keep)
   ];
 }
 
-function normaliseTurn(turn) {
+function normaliseTurn(turn, maxChars = 0) {
+  const content = String(turn.content ?? '');
   return {
     role: turn.role === 'assistant' ? 'assistant' : turn.role === 'system' ? 'system' : 'user',
-    content: String(turn.content ?? '')
+    content: maxChars > 0 && content.length > maxChars
+      ? `${content.slice(0, maxChars)}\n… (${content.length - maxChars} characters trimmed)`
+      : content
   };
 }
 

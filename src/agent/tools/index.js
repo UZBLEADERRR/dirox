@@ -37,8 +37,39 @@ const DEFAULT_TIMEOUT_MS = 180_000;
  */
 const PREVIEW_TOOL_NAMES = new Set(previewTools.map(tool => tool.name));
 
-export function toolsFor({ mode = 'agent', featureFlags = {}, hasRepository = false, hasDevCommand = false } = {}) {
+/**
+ * Toolsets by intent.
+ *
+ * Tool schemas are the largest fixed cost in an agent request — all 32 of them
+ * come to roughly 3,600 tokens, sent on every call whether or not any will be
+ * used. A greeting needs none of them; a question needs the six that read.
+ *
+ * `read` is deliberately small rather than "everything non-destructive":
+ * offering fifteen ways to look something up makes the model try several. It
+ * omits project inspection and memory recall because retrieval already puts
+ * both in front of the model — paying for the schema as well is paying twice.
+ */
+const TOOLSETS = {
+  none: [],
+  read: ['read_file', 'search_code', 'find_symbol', 'list_directory'],
+  full: null   // everything the mode and flags allow
+};
+
+/**
+ * @param {{mode?:string, intent?:string, toolset?:string, featureFlags?:object,
+ *          hasRepository?:boolean, hasDevCommand?:boolean}} options
+ */
+export function toolsFor({ mode = 'agent', toolset, featureFlags = {}, hasRepository = false, hasDevCommand = false } = {}) {
+  // The intent profile decides first: it can refuse tools outright, which no
+  // amount of later filtering can do as cheaply.
+  if (toolset === 'none') return [];
+
   let tools = ALL_TOOLS;
+
+  if (toolset && TOOLSETS[toolset]) {
+    const allowed = new Set(TOOLSETS[toolset]);
+    tools = tools.filter(tool => allowed.has(tool.name));
+  }
 
   if (mode === 'ask' || mode === 'review' || mode === 'plan') {
     tools = tools.filter(tool => tool.risk === RISK.SAFE);
