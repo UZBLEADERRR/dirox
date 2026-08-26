@@ -14,6 +14,7 @@ import { drainObservability } from './modules/observability/audit.js';
 import { startWorker, stopWorker } from './queue/worker.js';
 // Importing the job modules is what registers their handlers with the worker.
 import './modules/projects/service.js';
+import './modules/agent/runner.js';
 
 const app = createApp();
 const server = createServer(app);
