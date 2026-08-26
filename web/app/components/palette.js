@@ -24,10 +24,11 @@ export function clearCommands(scope) { contextual.delete(scope); }
 
 function baseCommands() {
   const list = [
-    { id: 'home', group: 'Go to', label: 'Home', icon: 'home', run: () => router.navigate('/app') },
+    { id: 'chat', group: 'Go to', label: 'New chat', icon: 'chat', run: () => router.navigate('/app') },
     { id: 'projects', group: 'Go to', label: 'Projects', icon: 'projects', run: () => router.navigate('/app/projects') },
     { id: 'tasks', group: 'Go to', label: 'Tasks', icon: 'tasks', run: () => router.navigate('/app/tasks') },
     { id: 'settings', group: 'Go to', label: 'Settings', icon: 'settings', run: () => router.navigate('/app/settings') },
+    { id: 'overview', group: 'Go to', label: 'Overview', icon: 'chart', run: () => router.navigate('/app/overview') },
     { id: 'usage', group: 'Go to', label: 'Usage and cost', icon: 'chart', run: () => router.navigate('/app/settings/usage') },
     { id: 'new-project', group: 'Create', label: 'New project', icon: 'plus', hint: 'Connect a repository', run: () => router.navigate('/app/projects?new=1') },
     {

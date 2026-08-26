@@ -58,8 +58,33 @@
 
 /* ── conversation ───────────────────────────────────────────────────────── */
 .chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.chat__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.chat__inner { max-width: 780px; margin: 0 auto; padding: var(--s-6) var(--s-5) var(--s-8); display: flex; flex-direction: column; gap: var(--s-6); }
+.chat__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.chat__inner {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-5) var(--s-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+/* An empty chat centres its welcome instead of pinning it to the top. */
+.chat__inner:has(.chat__welcome) { margin: auto; }
+
+/* ── the welcome screen ─────────────────────────────────────────────────── */
+/* Centred on the empty chat, and gone the moment there is a first turn. */
+.chat__welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-2);
+}
+.chat__welcome-mark { color: var(--accent); }
+.chat__welcome-title { font-size: var(--fs-2xl); letter-spacing: var(--tracking-tight); }
+.chat__welcome-body { margin: 0; max-width: 46ch; color: var(--text-muted); font-size: var(--fs-md); }
+.chat__suggestions { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; margin-top: var(--s-3); }
 
 .msg { display: flex; flex-direction: column; gap: var(--s-2); }
 .msg__role {
@@ -143,14 +168,66 @@
 }
 .composer__input::placeholder { color: var(--text-disabled); }
 
+/* The send button stays put; the pickers scroll sideways if the bar is short. */
 .composer__bar {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  padding: var(--s-2);
 }
+.composer__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composer__tools::-webkit-scrollbar { display: none; }
 .composer__spacer { flex: 1; }
 .composer__hint { font-size: var(--fs-2xs); color: var(--text-disabled); }
+
+/*
+   A picker in the composer bar is a select without the box: the label reads as
+   text until you hover it, so three controls sit in the bar without turning it
+   into a form. The select itself still handles keyboard, touch and screen
+   readers, because it is a real select.
+*/
+.composer__picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding-left: var(--s-2);
+  border-radius: var(--r-md);
+  color: var(--text-subtle);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.composer__picker:hover { background: var(--bg-hover); color: var(--text); }
+.composer__picker:focus-within { background: var(--bg-hover); color: var(--text); }
+
+.select--bare {
+  --field-h: 28px;
+  width: auto;
+  max-width: 160px;
+  min-height: var(--field-h);
+  padding: 0 var(--s-5) 0 var(--s-1);
+  background-color: transparent;
+  border-color: transparent;
+  color: inherit;
+  font-size: var(--fs-xs);
+  line-height: var(--field-h);
+  background-position: right var(--s-1) center;
+}
+.select--bare:hover:not(:disabled) { border-color: transparent; }
+.select--bare:focus {
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-strong);
+}
+.select--bare:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .composer__attachments { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: 0 var(--s-4) var(--s-2); }
 .attachment {
@@ -165,17 +242,16 @@
   color: var(--text-muted);
 }
 
-.mode-picker { display: flex; gap: 2px; padding: 2px; background: var(--bg-inset); border-radius: var(--r-md); border: 1px solid var(--border); }
-.mode-picker__btn {
-  padding: 3px var(--s-2);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-2xs);
-  font-weight: 500;
-  color: var(--text-subtle);
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+.attachment__name { max-width: 140px; }
+.attachment__remove { color: var(--text-subtle); display: grid; place-items: center; }
+.attachment__remove:hover { color: var(--danger); }
+
+/* On a phone the keyboard hint is noise and the bar needs the room. */
+@media (max-width: 640px) {
+  .composer { padding: var(--s-3) var(--s-3) calc(var(--s-3) + env(safe-area-inset-bottom)); }
+  .composer__hint { display: none; }
+  .select--bare { max-width: 116px; font-size: var(--fs-2xs); }
 }
-.mode-picker__btn:hover { color: var(--text); }
-.mode-picker__btn[aria-pressed="true"] { background: var(--bg-active); color: var(--text-strong); }
 
 /* ── task status strip ──────────────────────────────────────────────────── */
 .task-strip {

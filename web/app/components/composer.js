@@ -1,13 +1,21 @@
 /**
- * The task input.
+ * The composer.
  *
- * Polished and quiet: a text area, a mode picker, and a send button. Advanced
- * controls stay hidden until they are needed. Enter sends, Shift+Enter breaks
- * the line, Escape stops a running agent.
+ * One text area and one row of controls: what to work on, how to work, and
+ * which model. Everything else — attachments, the stop button, the keyboard
+ * hint — appears only when it applies.
+ *
+ * The three pickers are native `<select>` elements on purpose. They are one
+ * tap on a phone, they are reachable by keyboard without any code, and the
+ * design system already styles them; a bespoke dropdown would be more code
+ * doing less.
+ *
+ * Enter sends, Shift+Enter breaks the line, Escape stops a running agent.
  */
 
-import { h, icon, mount, clear } from '../lib/dom.js';
+import { h, icon, mount } from '../lib/dom.js';
 import { store } from '../lib/store.js';
+import { api } from '../lib/api.js';
 
 const MODES = [
   ['agent', 'Agent', 'Plan, edit, test and report'],
@@ -18,48 +26,117 @@ const MODES = [
   ['autopilot', 'Autopilot', 'Continue until done or blocked']
 ];
 
+/** Modes that cannot do anything useful without a repository to work in. */
+const NEEDS_PROJECT = new Set(['debug', 'review', 'autopilot']);
+
 /**
- * @param {{onSend:(text:string, options:object)=>void, onStop:()=>void, mode?:string, placeholder?:string}} options
+ * @param {{
+ *   onSend: (text: string, options: object) => void,
+ *   onStop: () => void,
+ *   mode?: string,
+ *   projectId?: string|null,
+ *   showProjectPicker?: boolean,
+ *   placeholder?: string
+ * }} options
  */
-export function createComposer({ onSend, onStop, mode: initialMode = 'agent', placeholder } = {}) {
+export function createComposer({
+  onSend, onStop, mode: initialMode = 'agent',
+  projectId: initialProjectId = null, showProjectPicker = false, placeholder
+} = {}) {
   let mode = initialMode;
+  let projectId = initialProjectId;
   let running = false;
   const attachments = [];
 
+  const defaultPlaceholder = placeholder || 'Ask DiroxCode anything, or describe what to build…';
+
   const input = h('textarea.composer__input', {
     rows: '1',
-    placeholder: placeholder || 'Tell DiroxCode what you want to build…',
-    'aria-label': 'Describe your task',
+    placeholder: defaultPlaceholder,
+    'aria-label': 'Message DiroxCode',
     spellcheck: 'true'
   });
 
   const attachmentBar = h('div.composer__attachments', { hidden: true });
 
-  const modePicker = h('div.mode-picker', { role: 'group', 'aria-label': 'Agent mode' },
-    MODES.map(([id, label, description]) => h('button.mode-picker__btn', {
-      type: 'button',
-      title: description,
-      'aria-pressed': String(id === mode),
-      onClick: () => {
-        mode = id;
-        for (const button of modePicker.children) {
-          button.setAttribute('aria-pressed', String(button.textContent === label));
-        }
-      }
-    }, label))
-  );
+  // ── pickers ──
+  const modeSelect = h('select.select.select--bare', {
+    'aria-label': 'Mode',
+    onChange: event => { mode = event.target.value; syncModeAvailability(); }
+  }, MODES.map(([id, label, description]) => h('option', { value: id, title: description }, label)));
+  modeSelect.value = mode;
 
-  const sendButton = h('button.btn.btn--primary.btn--icon', {
-    type: 'button',
-    'aria-label': 'Send',
-    title: 'Send (Enter)',
+  const projectSelect = h('select.select.select--bare', {
+    'aria-label': 'Project',
+    onChange: event => { projectId = event.target.value || null; syncModeAvailability(); }
+  });
+
+  const modelSelect = h('select.select.select--bare', { 'aria-label': 'Model' });
+
+  const projectWrap = h('label.composer__picker', { hidden: !showProjectPicker },
+    icon('folder', { size: 13 }), projectSelect);
+
+  const modelWrap = h('label.composer__picker', { hidden: true },
+    icon('sparkle', { size: 13 }), modelSelect);
+
+  /**
+   * Only models an administrator has opened to users appear here. The server
+   * enforces the same list, so a stale page cannot reach a closed model.
+   */
+  function renderModels(models, defaultModelId) {
+    modelWrap.hidden = models.length === 0;
+    mount(modelSelect,
+      h('option', { value: '' }, 'Automatic'),
+      models.map(model => h('option', { value: model.id, title: model.description || '' }, model.name))
+    );
+    if (defaultModelId && models.some(model => model.id === defaultModelId)) modelSelect.value = defaultModelId;
+  }
+
+  function renderProjects(projects) {
+    mount(projectSelect,
+      h('option', { value: '' }, 'No project'),
+      projects.map(project => h('option', { value: project.id }, project.name))
+    );
+    projectSelect.value = projectId || '';
+  }
+
+  /**
+   * Some modes are meaningless without a repository. Disabling them is honest;
+   * offering them and then failing is not.
+   */
+  function syncModeAvailability() {
+    for (const option of modeSelect.options) {
+      option.disabled = !projectId && NEEDS_PROJECT.has(option.value);
+    }
+    if (!projectId && NEEDS_PROJECT.has(mode)) {
+      mode = 'agent';
+      modeSelect.value = mode;
+    }
+  }
+
+  store.subscribe(s => s.projects, renderProjects);
+  store.subscribe(s => ({ models: s.models, defaultModelId: s.defaultModelId }),
+    ({ models, defaultModelId }) => renderModels(models, defaultModelId));
+
+  renderProjects(store.state.projects);
+  renderModels(store.state.models, store.state.defaultModelId);
+  syncModeAvailability();
+
+  // The list is fetched once per session and shared by every composer.
+  if (!store.state.models.length) {
+    api.get('/me/models')
+      .then(({ models, defaultModelId }) => store.set({ models, defaultModelId }))
+      .catch(() => { /* the picker stays hidden and routing stays automatic */ });
+  }
+
+  // ── buttons ──
+  const sendButton = h('button.btn.btn--primary.btn--icon.composer__send', {
+    type: 'button', 'aria-label': 'Send', title: 'Send (Enter)',
     onClick: () => submit()
   }, icon('arrowRight', { size: 15 }));
 
   const stopButton = h('button.btn.btn--danger.btn--sm', {
-    type: 'button',
-    hidden: true,
-    title: 'Stop the agent (Esc)',
+    type: 'button', hidden: true, title: 'Stop the agent (Esc)',
     onClick: () => onStop?.()
   }, icon('stop', { size: 12 }), 'Stop');
 
@@ -91,8 +168,9 @@ export function createComposer({ onSend, onStop, mode: initialMode = 'agent', pl
     attachmentBar.hidden = attachments.length === 0;
     mount(attachmentBar, attachments.map((file, index) => h('span.attachment',
       icon(file.type.startsWith('image/') ? 'layers' : 'file', { size: 11 }),
-      h('span.truncate', { style: { maxWidth: '140px' } }, file.name),
-      h('button', {
+      h('span.truncate.attachment__name', file.name),
+      h('button.attachment__remove', {
+        type: 'button',
         'aria-label': `Remove ${file.name}`,
         onClick: () => { attachments.splice(index, 1); renderAttachments(); }
       }, icon('close', { size: 10 }))
@@ -121,7 +199,12 @@ export function createComposer({ onSend, onStop, mode: initialMode = 'agent', pl
     attachments.length = 0;
     renderAttachments();
 
-    onSend?.(text, { mode, attachments: payload });
+    onSend?.(text, {
+      mode,
+      projectId,
+      modelId: modelSelect.value || null,
+      attachments: payload
+    });
   }
 
   input.addEventListener('input', autoResize);
@@ -146,11 +229,14 @@ export function createComposer({ onSend, onStop, mode: initialMode = 'agent', pl
         input,
         attachmentBar,
         h('div.composer__bar',
-          modePicker,
-          attachButton,
-          filePicker,
-          h('div.composer__spacer'),
-          h('span.composer__hint', h('kbd', '↵'), ' send · ', h('kbd', '⇧↵'), ' new line'),
+          h('div.composer__tools',
+            attachButton,
+            filePicker,
+            projectWrap,
+            h('label.composer__picker', icon('settings', { size: 13 }), modeSelect),
+            modelWrap
+          ),
+          h('span.composer__hint', h('kbd', '↵'), ' send'),
           stopButton,
           sendButton
         )
@@ -162,19 +248,23 @@ export function createComposer({ onSend, onStop, mode: initialMode = 'agent', pl
     element,
     focus: () => input.focus(),
     get mode() { return mode; },
-    setMode(next) {
-      mode = next;
-      for (const button of modePicker.children) {
-        const entry = MODES.find(([id]) => id === next);
-        button.setAttribute('aria-pressed', String(entry && button.textContent === entry[1]));
-      }
+    get projectId() { return projectId; },
+
+    setMode(next) { mode = next; modeSelect.value = next; syncModeAvailability(); },
+
+    setProject(id) {
+      projectId = id || null;
+      projectSelect.value = projectId || '';
+      syncModeAvailability();
     },
+
     setRunning(value) {
       running = value;
       sendButton.hidden = value;
       stopButton.hidden = !value;
-      input.placeholder = value ? 'DiroxCode is working…' : (placeholder || 'Tell DiroxCode what you want to build…');
+      input.placeholder = value ? 'DiroxCode is working…' : defaultPlaceholder;
     },
+
     setValue(text) { input.value = text; autoResize(); }
   };
 }

@@ -10,14 +10,14 @@ import { toastError } from './lib/toast.js';
 
 const root = qs('#root');
 
-/** Page modules load on demand; the landing page never pulls in the workspace. */
+/** Page modules load on demand; the landing page never pulls in the chat. */
 const pages = {
   landing: () => import('./pages/landing.js'),
   login: () => import('./pages/auth.js'),
-  home: () => import('./pages/home.js'),
+  chat: () => import('./pages/workspace.js'),
+  overview: () => import('./pages/home.js'),
   projects: () => import('./pages/projects.js'),
   project: () => import('./pages/project.js'),
-  workspace: () => import('./pages/workspace.js'),
   tasks: () => import('./pages/tasks.js'),
   task: () => import('./pages/task.js'),
   settings: () => import('./pages/settings.js'),
@@ -54,11 +54,15 @@ function registerRoutes() {
     .add('/signup', async ctx => (await pages.login()).render(renderShellless, { mode: 'signup', ...ctx }), { public: true, guestOnly: true })
     .add('/reset-password', async ctx => (await pages.login()).render(renderShellless, { mode: 'reset', ...ctx }), { public: true })
     .add('/auth/callback', async ctx => (await pages.login()).render(renderShellless, { mode: 'callback', ...ctx }), { public: true })
-    .add('/app', async ctx => (await pages.home()).render(ctx))
+    // Chat is the landing view: signing in puts you in front of DiroxCode,
+    // not in front of a dashboard about DiroxCode.
+    .add('/app', async ctx => (await pages.chat()).render(ctx))
+    .add('/app/chat/:conversationId', async ctx => (await pages.chat()).render(ctx))
+    .add('/app/overview', async ctx => (await pages.overview()).render(ctx))
     .add('/app/projects', async ctx => (await pages.projects()).render(ctx))
     .add('/app/projects/:id', async ctx => (await pages.project()).render(ctx))
-    .add('/app/projects/:id/chat', async ctx => (await pages.workspace()).render(ctx))
-    .add('/app/projects/:id/chat/:conversationId', async ctx => (await pages.workspace()).render(ctx))
+    .add('/app/projects/:id/chat', async ctx => (await pages.chat()).render(ctx))
+    .add('/app/projects/:id/chat/:conversationId', async ctx => (await pages.chat()).render(ctx))
     .add('/app/tasks', async ctx => (await pages.tasks()).render(ctx))
     .add('/app/tasks/:id', async ctx => (await pages.task()).render(ctx))
     .add('/app/settings', async ctx => (await pages.settings()).render(ctx))

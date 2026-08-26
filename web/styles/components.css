@@ -59,7 +59,22 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── inputs ─────────────────────────────────────────────────────────────── */
-.field { display: flex; flex-direction: column; gap: var(--s-2); }
+/*
+   Three things make a form field feel broken rather than merely plain, and all
+   three are fixed here:
+
+   1. A font below 16px makes iOS Safari zoom the whole page on focus, and it
+      never zooms back. Coarse pointers therefore get 16px regardless of the
+      density the rest of the interface uses.
+   2. Chrome paints its own background and near-black text on an autofilled
+      field, which on a dark theme is an unreadable white slab. There is no
+      property that turns that off; an inset shadow the size of the field is
+      the only way to cover it.
+   3. A control shorter than 44px is a miss on a touch screen. Height comes
+      from a variable so one rule serves both pointer types.
+*/
+.field { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+.field--row { flex-direction: row; align-items: center; gap: var(--s-3); }
 
 .label {
   font-size: var(--fs-xs);
@@ -67,42 +82,152 @@
   color: var(--text-muted);
   letter-spacing: var(--tracking-snug);
 }
+.label__optional { color: var(--text-disabled); font-weight: 400; }
 
 .input, .textarea, .select {
+  --field-h: 38px;
   width: 100%;
-  min-height: 36px;
-  padding: var(--s-2) var(--s-3);
+  min-height: var(--field-h);
+  padding: 0 var(--s-3);
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   color: var(--text);
+  caret-color: var(--accent);
   font-size: var(--fs-md);
-  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  line-height: calc(var(--field-h) - 2px);
+  transition: border-color var(--t-fast) var(--ease),
+              background var(--t-fast) var(--ease),
+              box-shadow var(--t-fast) var(--ease);
 }
+
 .input::placeholder, .textarea::placeholder { color: var(--text-disabled); }
-.input:hover, .textarea:hover, .select:hover { border-color: var(--border-strong); }
+.input:hover:not(:disabled), .textarea:hover:not(:disabled), .select:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
 .input:focus, .textarea:focus, .select:focus {
   border-color: var(--accent);
   background: var(--bg-panel);
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-quiet);
 }
-.input[aria-invalid="true"] { border-color: var(--danger); }
 
-.textarea { min-height: 90px; resize: vertical; line-height: var(--lh-snug); }
+.input:disabled, .textarea:disabled, .select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--bg);
+}
 
+.input[aria-invalid="true"], .textarea[aria-invalid="true"], .select[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px var(--danger-quiet); }
+
+.input--lg { --field-h: 46px; font-size: var(--fs-lg); padding: 0 var(--s-4); }
+.input--mono { font-family: var(--font-mono); font-size: var(--fs-sm); letter-spacing: 0; }
+
+/* Chrome's autofill styling, overpainted. The transition delay keeps the
+   colour from flashing through before the shadow lands. */
+.input:-webkit-autofill,
+.input:-webkit-autofill:hover,
+.input:-webkit-autofill:focus,
+.textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-inset) inset;
+  box-shadow: 0 0 0 1000px var(--bg-inset) inset;
+  caret-color: var(--accent);
+  transition: background-color 100000s ease 0s;
+}
+.input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-panel) inset, 0 0 0 3px var(--accent-quiet);
+  box-shadow: 0 0 0 1000px var(--bg-panel) inset, 0 0 0 3px var(--accent-quiet);
+}
+
+.textarea {
+  min-height: 96px;
+  padding: var(--s-3);
+  line-height: var(--lh-snug);
+  resize: vertical;
+}
+
+/* The native arrow cannot be styled, so it is replaced by one drawn at a
+   position that holds at any height. */
 .select {
   appearance: none;
   padding-right: var(--s-8);
-  background-image: linear-gradient(45deg, transparent 50%, var(--text-subtle) 50%),
-                    linear-gradient(135deg, var(--text-subtle) 50%, transparent 50%);
-  background-position: calc(100% - 15px) 15px, calc(100% - 10px) 15px;
-  background-size: 5px 5px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6b78' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
+  background-position: right var(--s-3) center;
 }
+.select:hover { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23d8d8de' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+.select option { background: var(--bg-elevated); color: var(--text); }
+/* A long option must not widen the control past its container. */
+.select { text-overflow: ellipsis; }
+
+/* Search and number fields, without the browser's own furniture. */
+.input[type="search"] { appearance: none; }
+.input[type="search"]::-webkit-search-decoration,
+.input[type="search"]::-webkit-search-cancel-button { appearance: none; }
+.input[type="number"] { -moz-appearance: textfield; }
+.input[type="number"]::-webkit-outer-spin-button,
+.input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* A field with something in front of it: an icon, a prefix, a unit. */
+.input-group { position: relative; display: flex; align-items: center; width: 100%; }
+.input-group__icon {
+  position: absolute;
+  left: var(--s-3);
+  display: grid;
+  place-items: center;
+  color: var(--text-subtle);
+  pointer-events: none;
+}
+.input-group__icon ~ .input { padding-left: calc(var(--s-3) + 16px + var(--s-2)); }
+.input-group__action {
+  position: absolute;
+  right: var(--s-2);
+  display: grid;
+  place-items: center;
+  padding: var(--s-1);
+  border-radius: var(--r-sm);
+  color: var(--text-subtle);
+}
+.input-group__action:hover { color: var(--text-strong); background: var(--bg-hover); }
+.input-group__action ~ .input { padding-right: var(--s-8); }
 
 .field__hint { font-size: var(--fs-xs); color: var(--text-subtle); }
 .field__error { font-size: var(--fs-xs); color: var(--danger); }
+
+/* Touch: 16px stops iOS zooming on focus, and 44px is a target a thumb hits. */
+@media (pointer: coarse) {
+  .input, .textarea, .select { --field-h: 46px; font-size: 16px; }
+  .input--lg { --field-h: 52px; }
+  .textarea { min-height: 112px; }
+}
+
+/* ── segmented control ──────────────────────────────────────────────────── */
+/* A few mutually exclusive choices, shown all at once. Beyond four options a
+   select is kinder; this is for two or three. */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.segmented__btn {
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-subtle);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.segmented__btn:hover { color: var(--text); }
+.segmented__btn[aria-pressed="true"] { background: var(--bg-active); color: var(--text-strong); }
 
 /* ── switch ─────────────────────────────────────────────────────────────── */
 .switch {

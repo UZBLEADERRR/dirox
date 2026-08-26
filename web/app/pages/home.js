@@ -1,8 +1,9 @@
 /**
- * Home dashboard.
+ * Overview.
  *
- * Deliberately quiet: greeting, what you were doing, what to do next. Every
- * number shown is read from the API — nothing here is decorative.
+ * Not the landing page — chat is. This is the page you open when you want the
+ * numbers: what you have been doing, what it cost, and what to pick back up.
+ * Deliberately quiet, and every number shown is read from the API.
  */
 
 import { h, icon, mount } from '../lib/dom.js';
@@ -64,11 +65,7 @@ function projectCard(project) {
 
 function quickActions() {
   const actions = [
-    ['Ask DiroxCode', 'sparkle', () => {
-      const project = store.state.projects[0];
-      if (project) router.navigate(`/app/projects/${project.id}/chat`);
-      else openNewProject();
-    }],
+    ['New chat', 'chat', () => router.navigate('/app')],
     ['New project', 'plus', () => openNewProject()],
     ['Connect GitHub', 'git', () => openNewProject({ source: 'github' })],
     ['Open project', 'projects', () => router.navigate('/app/projects')]
@@ -106,7 +103,7 @@ export async function render() {
   const session = store.state.session;
   const content = h('div.view__inner');
 
-  renderInShell(content, { title: 'Home' });
+  renderInShell(content, { title: 'Overview' });
 
   mount(content,
     h('div.page-head',

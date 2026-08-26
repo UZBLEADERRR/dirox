@@ -1,7 +1,8 @@
 /* ==========================================================================
    DiroxCode — application shell
-   Desktop is a resizable three-column workspace. Mobile is not a squeezed
-   desktop: panels become bottom sheets and navigation moves to a tab bar.
+   Desktop is a resizable three-column workspace. Mobile is the same shell with
+   the sidebar as a drawer: one navigation, not two that disagree. There is no
+   bottom tab bar.
    ========================================================================== */
 
 .app {
@@ -29,10 +30,12 @@
   align-items: center;
   gap: var(--s-3);
   height: var(--topbar-h);
-  padding: 0 var(--s-4);
+  padding: 0 var(--s-3) 0 var(--s-4);
   flex: none;
-  border-bottom: 1px solid var(--border);
 }
+.sidebar__brand .brand { display: flex; align-items: center; gap: var(--s-3); min-width: 0; flex: 1; }
+.sidebar__collapse { flex: none; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.sidebar:hover .sidebar__collapse, .sidebar__collapse:focus-visible { opacity: 1; }
 .sidebar__wordmark {
   font-size: var(--fs-md);
   font-weight: 700;
@@ -41,9 +44,19 @@
 }
 .sidebar__wordmark span { color: var(--accent); }
 
-.sidebar__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s-3) var(--s-2); }
+.sidebar__top { flex: none; padding: var(--s-1) var(--s-2) var(--s-3); display: flex; flex-direction: column; gap: var(--s-1); }
+.sidebar__new { justify-content: flex-start; gap: var(--s-3); padding: 0 var(--s-3); }
 
-.nav-group { margin-bottom: var(--s-5); }
+.sidebar__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--s-2) var(--s-3); }
+
+.nav-list { display: flex; flex-direction: column; gap: 1px; }
+.nav-empty { margin: 0; padding: var(--s-2); font-size: var(--fs-xs); color: var(--text-disabled); }
+.nav-group__action { color: var(--text-subtle); display: grid; place-items: center; padding: 2px; border-radius: var(--r-sm); }
+.nav-group__action:hover { color: var(--text-strong); background: var(--bg-hover); }
+.nav-item--search kbd { opacity: 0.7; }
+
+.nav-group { margin-bottom: var(--s-4); }
+.nav-group:last-child { margin-bottom: 0; }
 .nav-group__label {
   display: flex;
   align-items: center;
@@ -76,6 +89,9 @@
 .nav-item__meta { flex: none; font-size: var(--fs-2xs); color: var(--text-subtle); font-variant-numeric: tabular-nums; }
 
 .sidebar__foot { flex: none; border-top: 1px solid var(--border); padding: var(--s-2); }
+.user-chip__text { flex: 1; min-width: 0; text-align: left; }
+.user-chip__name { font-size: var(--fs-sm); color: var(--text); }
+.user-chip__org { font-size: var(--fs-2xs); color: var(--text-subtle); }
 
 .user-chip {
   display: flex;
@@ -133,13 +149,18 @@
 }
 .topbar__title { font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong); }
 .topbar__spacer { flex: 1; }
+.topbar__menu { display: none; }
+.topbar__notify { position: relative; }
+.topbar__unread { position: absolute; top: 4px; right: 4px; }
 
 .breadcrumb { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); min-width: 0; }
 .breadcrumb__sep { color: var(--text-disabled); }
 .breadcrumb a { color: var(--text-muted); }
 .breadcrumb a:hover { color: var(--text); }
 
+/* A normal page scrolls; a chat fills the viewport and scrolls inside itself. */
 .view { flex: 1; min-height: 0; overflow-y: auto; }
+.view[data-fill="true"] { overflow: hidden; display: flex; flex-direction: column; }
 .view__inner { max-width: var(--content-max); margin: 0 auto; padding: var(--s-8) var(--s-6) var(--s-16); }
 .view__inner--narrow { max-width: 760px; }
 .view__inner--wide { max-width: none; }
@@ -167,6 +188,7 @@
 
 /* ── right work panel ───────────────────────────────────────────────────── */
 .workpanel {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -221,7 +243,6 @@
 .stat__delta--down { color: var(--danger); }
 
 /* ── mobile ─────────────────────────────────────────────────────────────── */
-.mobile-nav { display: none; }
 .sheet-backdrop { display: none; }
 
 @media (max-width: 1100px) {
@@ -229,22 +250,23 @@
 }
 
 @media (max-width: 900px) {
+  /* One column. The sidebar is a drawer over it, not a second navigation. */
   .app,
   .app[data-panel="open"],
   .app[data-sidebar="collapsed"] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 1fr auto;
+    grid-template-rows: 100dvh;
   }
 
-  /* Sidebar becomes a drawer. */
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    width: min(300px, 84vw);
+    width: min(300px, 86vw);
     z-index: var(--z-overlay);
     transform: translateX(-102%);
     transition: transform var(--t-base) var(--ease-out);
     box-shadow: var(--shadow-lg);
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .app[data-drawer="open"] .sidebar { transform: translateX(0); }
   .app[data-drawer="open"] .sheet-backdrop {
@@ -254,12 +276,15 @@
     z-index: calc(var(--z-overlay) - 1);
     background: var(--bg-overlay);
   }
+  .sidebar__collapse { display: none; }
 
-  .main { grid-row: 1; padding-bottom: 0; }
+  .topbar__menu { display: inline-flex; }
+  .topbar__panel { display: none; }
+  .main { grid-row: 1; }
   .view__inner { padding: var(--s-5) var(--s-4) var(--s-12); }
   .page-head__title { font-size: var(--fs-2xl); }
 
-  /* Work panel becomes a full-height bottom sheet. */
+  /* Work panel becomes a bottom sheet. */
   .workpanel {
     position: fixed;
     inset: auto 0 0 0;
@@ -285,38 +310,12 @@
   .workpanel__tabs { padding-top: var(--s-3); height: auto; min-height: 52px; }
   .panel-resizer { display: none; }
 
-  /* Bottom tab bar. */
-  .mobile-nav {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 1fr;
-    grid-row: 2;
-    height: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
-    background: var(--bg-elevated);
-    border-top: 1px solid var(--border);
-    z-index: var(--z-sticky);
-  }
-  .mobile-nav__item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    font-size: var(--fs-2xs);
-    color: var(--text-subtle);
-    min-height: 44px;
-    transition: color var(--t-fast) var(--ease);
-  }
-  .mobile-nav__item[aria-current="page"] { color: var(--accent); }
-  .mobile-nav__icon { width: 20px; height: 20px; }
-
   /* Comfortable touch targets everywhere. */
-  .btn { --btn-h: 40px; }
-  .btn--sm { --btn-h: 34px; }
+  .btn { --btn-h: 42px; }
+  .btn--sm { --btn-h: 36px; }
   .nav-item { padding: var(--s-3) var(--s-2); }
   .table td, .table th { padding: var(--s-3) var(--s-2); }
-  .toasts { bottom: calc(var(--mobile-nav-h) + var(--s-4) + env(safe-area-inset-bottom)); left: var(--s-4); right: var(--s-4); max-width: none; }
+  .toasts { bottom: calc(var(--s-4) + env(safe-area-inset-bottom)); left: var(--s-4); right: var(--s-4); max-width: none; }
   .modal { max-width: none; max-height: 92dvh; border-radius: var(--r-xl) var(--r-xl) 0 0; align-self: flex-end; }
   .overlay { padding: 0; align-items: flex-end; }
 }
@@ -363,7 +362,16 @@
 .setting-row:last-child { border-bottom: none; }
 .setting-row__label { font-size: var(--fs-sm); color: var(--text-strong); font-weight: 500; }
 .setting-row__hint { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 3px; max-width: 52ch; }
-.setting-row__control { flex: none; min-width: 160px; display: flex; justify-content: flex-end; }
+/* The control takes what it needs up to about half the row; past that the
+   explanation gets squeezed into a column two words wide. */
+.setting-row__control {
+  flex: 0 1 auto;
+  min-width: 160px;
+  max-width: min(340px, 52%);
+  display: flex;
+  justify-content: flex-end;
+}
+.setting-row__control > * { max-width: 100%; }
 
 .danger-zone { border-color: var(--accent-line); }
 .danger-zone .setting-row__label { color: var(--danger); }
@@ -381,5 +389,5 @@
   .settings__nav::-webkit-scrollbar { display: none; }
   .settings__link { white-space: nowrap; }
   .setting-row { flex-direction: column; align-items: stretch; gap: var(--s-3); }
-  .setting-row__control { justify-content: flex-start; min-width: 0; }
+  .setting-row__control { justify-content: flex-start; min-width: 0; max-width: none; }
 }

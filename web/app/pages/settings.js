@@ -162,8 +162,32 @@ function aiPanel(save) {
   const preferences = profile.aiPreferences || {};
   const update = patch => save({ aiPreferences: { ...preferences, ...patch } });
 
+  // The model list is whatever an administrator has opened to users. If none
+  // is open, the row does not appear at all rather than offering an empty
+  // control.
+  const modelRow = h('div');
+  const renderModelRow = models => {
+    if (!models.length) return mount(modelRow);
+    mount(modelRow, row('Default model',
+      'Which model answers unless a chat picks another. Automatic routes by how hard the request is, which is usually cheaper.',
+      h('select.select', { onChange: e => update({ defaultModelId: e.target.value || null }) },
+        h('option', { value: '', selected: !preferences.defaultModelId }, 'Automatic'),
+        models.map(model => h('option', {
+          value: model.id, selected: preferences.defaultModelId === model.id
+        }, model.name)))));
+  };
+
+  renderModelRow(store.state.models);
+  if (!store.state.models.length) {
+    api.get('/me/models')
+      .then(({ models, defaultModelId }) => { store.set({ models, defaultModelId }); renderModelRow(models); })
+      .catch(() => { /* routing stays automatic */ });
+  }
+
   return h('div',
     h('div.card',
+      modelRow,
+
       row('Autonomy', 'How much DiroxCode does before asking. Deleting files, pushing to Git and touching production always ask, whatever you choose here.',
         h('select.select', { onChange: e => update({ autonomy: e.target.value }) },
           [['safe', 'Safe — ask before any change'],
@@ -271,9 +295,9 @@ async function openPlanPicker(currentCode) {
     const { plans } = await api.get('/billing/plans');
     let interval = 'monthly';
 
-    const intervalPicker = h('div.mode-picker', { style: { alignSelf: 'flex-start' } },
+    const intervalPicker = h('div.segmented', { style: { alignSelf: 'flex-start' } },
       [['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([value, label]) =>
-        h('button.mode-picker__btn', {
+        h('button.segmented__btn', {
           'aria-pressed': String(value === interval),
           onClick: () => {
             interval = value;

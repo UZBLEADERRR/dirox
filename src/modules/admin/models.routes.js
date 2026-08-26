@@ -62,6 +62,7 @@ function shapeModel(model, providers) {
     supportsPromptCache: model.supports_prompt_cache,
     tiers: model.tiers,
     enabled: model.enabled,
+    userSelectable: model.user_selectable === true,
     priority: model.priority,
     fallbackModelId: model.fallback_model_id,
     requestsPerMinute: model.requests_per_minute,
@@ -100,6 +101,7 @@ const modelSchema = t.object({
   supportsPromptCache: t.boolean(),
   tiers: t.array(t.enum(LEVELS), { max: 5 }),
   enabled: t.boolean(),
+  userSelectable: t.boolean(),
   priority: t.integer({ min: 0, max: 1000 }),
   fallbackModelId: uuid(),
   requestsPerMinute: t.integer({ min: 1, max: 100_000 }),
@@ -113,6 +115,7 @@ const MODEL_COLUMNS = {
   maxOutput: 'max_output', supportsReasoning: 'supports_reasoning', supportsVision: 'supports_vision',
   supportsTools: 'supports_tools', supportsStructuredOutput: 'supports_structured_output',
   supportsPromptCache: 'supports_prompt_cache', tiers: 'tiers', enabled: 'enabled',
+  userSelectable: 'user_selectable',
   priority: 'priority', fallbackModelId: 'fallback_model_id',
   requestsPerMinute: 'requests_per_minute', tokensPerMinute: 'tokens_per_minute'
 };

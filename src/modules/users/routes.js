@@ -10,6 +10,8 @@ import { hasServiceRole, serviceClient } from '../../db/supabase.js';
 import { audit } from '../observability/audit.js';
 import { invalidateIdentity } from '../auth/service.js';
 import { forget } from './presence.js';
+import { selectableModels } from '../../ai/catalog.js';
+import { getPlanUsage } from '../billing/usage.js';
 
 const aiPreferences = t.object({
   defaultModelId: t.string({ max: 40 }),
@@ -49,8 +51,40 @@ const COLUMN_MAP = {
 export function userRoutes() {
   const router = new Router();
 
+  /**
+   * The models this user may choose.
+   *
+   * The chat panel's picker is populated from here rather than from the full
+   * catalogue, so it can only ever offer what an administrator has opened and
+   * the organization's plan can reach.
+   */
+  router.get('/models', async ctx => {
+    const { plan } = await getPlanUsage(ctx.auth);
+    const models = await selectableModels({ allowedTiers: plan.allowedModelTiers }).catch(() => []);
+    const preferred = ctx.auth.profile?.ai_preferences?.defaultModelId ?? null;
+
+    return sendJson(ctx.res, 200, {
+      models,
+      // A preference for a model that has since been closed is reported as
+      // absent, so the panel shows "automatic" rather than a stale name.
+      defaultModelId: models.some(model => model.id === preferred) ? preferred : null
+    });
+  }, { auth: true });
+
   router.patch('/profile', async ctx => {
     const body = parse(profileUpdate, await ctx.json());
+
+    // A model preference is checked here rather than silently ignored at
+    // routing time, so choosing a closed model fails visibly instead of
+    // appearing to work.
+    if (body.aiPreferences?.defaultModelId) {
+      const { plan } = await getPlanUsage(ctx.auth);
+      const models = await selectableModels({ allowedTiers: plan.allowedModelTiers }).catch(() => []);
+      if (!models.some(model => model.id === body.aiPreferences.defaultModelId)) {
+        throw badRequest('That model is not available on your plan. Choose one from the model list, or leave it automatic.');
+      }
+    }
+
     const patch = {};
     for (const [key, column] of Object.entries(COLUMN_MAP)) {
       if (body[key] !== undefined) patch[column] = body[key];

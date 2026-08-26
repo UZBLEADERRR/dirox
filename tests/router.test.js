@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classify, parseClassification, LEVELS, levelIndex } from '../src/ai/router.js';
+import { preferenceAllowed } from '../src/ai/catalog.js';
 
 test('greetings route to the cheapest tier', () => {
   for (const text of ['hi', 'hello', 'thanks', 'ok']) {
@@ -55,4 +56,34 @@ test('model classification is parsed, and garbage falls back', () => {
   assert.equal(parseClassification('not json at all', fallback).level, 'level1');
   // An invalid level is rejected rather than trusted.
   assert.equal(parseClassification('{"level":"level99","category":"code"}', fallback).level, 'level1');
+});
+
+// ─── model access ───────────────────────────────────────────────────────────
+//
+// `enabled` and `user_selectable` answer different questions, and letting a
+// client's preference bypass the second is how a closed model gets used.
+
+const openModel = {
+  id: 'm-open', user_selectable: true, tiers: ['level1', 'level2'],
+  supports_tools: true, supports_vision: false
+};
+const closedModel = { ...openModel, id: 'm-closed', user_selectable: false };
+
+test('a preference is honoured only for a model an administrator opened', () => {
+  assert.equal(preferenceAllowed(openModel), true);
+  assert.equal(preferenceAllowed(closedModel), false, 'a closed model must not be reachable by asking for it');
+  assert.equal(preferenceAllowed(null), false);
+  assert.equal(preferenceAllowed({ ...openModel, user_selectable: undefined }), false, 'absent must mean closed');
+});
+
+test('an open model still has to fit the plan and the request', () => {
+  assert.equal(preferenceAllowed(openModel, { allowedTiers: ['level0'] }), false, 'outside the plan tiers');
+  assert.equal(preferenceAllowed(openModel, { allowedTiers: ['level0', 'level1'] }), true);
+  assert.equal(preferenceAllowed(openModel, { requireVision: true }), false, 'cannot see images');
+  assert.equal(preferenceAllowed(openModel, { requireTools: true }), true);
+  assert.equal(preferenceAllowed({ ...openModel, supports_tools: false }, { requireTools: true }), false);
+});
+
+test('an empty tier list means the plan does not narrow anything', () => {
+  assert.equal(preferenceAllowed(openModel, { allowedTiers: [] }), true);
 });

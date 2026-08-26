@@ -12,7 +12,7 @@
  * after a measured failure, and never more than the configured number of times.
  */
 
-import { loadCatalog, systemSetting } from './catalog.js';
+import { loadCatalog, systemSetting, preferenceAllowed } from './catalog.js';
 import { badRequest, notConfigured } from '../core/errors.js';
 import { logger } from '../core/logger.js';
 
@@ -139,10 +139,22 @@ export async function route(request) {
     (!request.requireVision || model.supports_vision);
 
   // 1. An explicit user preference, if it is allowed and capable.
+  //
+  // A preference is a request, not a permission. It is honoured only for a
+  // model an administrator has opened to users: `enabled` says the router may
+  // use a model, `user_selectable` says a person may choose it, and a client
+  // that asks for anything else is quietly routed normally rather than obeyed.
   if (request.preferredModelId) {
     const preferred = catalog.modelsById.get(request.preferredModelId);
-    if (preferred && capable(preferred) && preferred.tiers?.some(tier => allowed.includes(tier))) {
+    if (preferenceAllowed(preferred, {
+      allowedTiers: allowed,
+      requireTools: request.requireTools,
+      requireVision: request.requireVision
+    })) {
       return buildRoute(catalog, preferred, null, { category, level, source: 'user_preference' });
+    }
+    if (preferred) {
+      logger.debug('ignoring a model preference that is not open to this user', { modelId: preferred.id });
     }
   }
 

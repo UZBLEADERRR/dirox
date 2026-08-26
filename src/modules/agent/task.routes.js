@@ -53,7 +53,7 @@ async function loadTask(ctx, id) {
 }
 
 /** Trust and model preference come from the user's profile, not the request. */
-async function runOptions(ctx, project) {
+async function runOptions(ctx, project, { modelId = null } = {}) {
   const preferences = ctx.auth.profile?.ai_preferences || {};
   const { plan } = await getPlanUsage(ctx.auth);
   return {
@@ -61,7 +61,10 @@ async function runOptions(ctx, project) {
     auth: ctx.auth,
     trust: Object.values(TRUST).includes(preferences.autonomy) ? preferences.autonomy : TRUST.CONFIRM,
     allowedTiers: plan.allowedModelTiers,
-    preferredModelId: preferences.defaultModelId || null,
+    // A per-request choice beats the saved default. Both are requests, not
+    // permissions: the router honours either only for a model an administrator
+    // has opened to users.
+    preferredModelId: modelId || preferences.defaultModelId || null,
     autoTest: preferences.autoTest !== false
   };
 }
@@ -93,6 +96,7 @@ export function taskRoutes() {
       projectId: uuid(),
       conversationId: uuid(),
       mode: t.enum(MODES, { default: 'agent' }),
+      modelId: uuid(),
       title: t.string({ max: 200, truncate: true }),
       budgetMicros: t.integer({ min: 1000, max: 50_000_000 }),
       background: t.boolean({ default: false })
@@ -133,7 +137,7 @@ export function taskRoutes() {
       resource: 'task', resourceId: task.id, metadata: { mode: body.mode, projectId: body.projectId }
     });
 
-    const options = await runOptions(ctx, project);
+    const options = await runOptions(ctx, project, { modelId: body.modelId });
 
     if (body.background) {
       await queueBackgroundRun(task, options);

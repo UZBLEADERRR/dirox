@@ -41,6 +41,20 @@ export function formatDuration(ms) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+/**
+ * Units, largest first. The first one the elapsed time reaches is the one
+ * used, which is what makes two days read as "2 days ago" rather than
+ * "48 hours ago".
+ */
+const UNITS = [
+  ['year', 31_536_000_000],
+  ['month', 2_592_000_000],
+  ['week', 604_800_000],
+  ['day', 86_400_000],
+  ['hour', 3_600_000],
+  ['minute', 60_000]
+];
+
 export function relativeTime(value) {
   if (!value) return '';
   const then = new Date(value).getTime();
@@ -49,22 +63,31 @@ export function relativeTime(value) {
   const abs = Math.abs(diff);
 
   if (abs < 45_000) return 'just now';
-  const units = [
-    [60_000, 'minute', 60_000],
-    [3_600_000, 'hour', 3_600_000],
-    [86_400_000, 'day', 86_400_000],
-    [604_800_000, 'week', 604_800_000],
-    [2_592_000_000, 'month', 2_592_000_000]
-  ];
+
   const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-  for (const [threshold, unit, divisor] of units) {
-    if (abs < threshold * 60 || unit === 'month') {
-      const amount = Math.round(-diff / divisor);
-      if (Math.abs(amount) < 1) continue;
-      return formatter.format(amount, unit);
-    }
+  for (const [unit, divisor] of UNITS) {
+    if (abs >= divisor) return formatter.format(Math.round(-diff / divisor), unit);
   }
-  return new Date(value).toLocaleDateString();
+  return 'just now';
+}
+
+/**
+ * The same instant in as few characters as possible: "3m", "2h", "5d".
+ * For a sidebar, where the age of a row is a hint and not a fact.
+ */
+export function shortTime(value) {
+  if (!value) return '';
+  const then = new Date(value).getTime();
+  if (!Number.isFinite(then)) return '';
+  const abs = Math.abs(Date.now() - then);
+
+  if (abs < 60_000) return 'now';
+  if (abs < 3_600_000) return `${Math.round(abs / 60_000)}m`;
+  if (abs < 86_400_000) return `${Math.round(abs / 3_600_000)}h`;
+  if (abs < 604_800_000) return `${Math.round(abs / 86_400_000)}d`;
+  if (abs < 2_592_000_000) return `${Math.round(abs / 604_800_000)}w`;
+  if (abs < 31_536_000_000) return `${Math.round(abs / 2_592_000_000)}mo`;
+  return `${Math.round(abs / 31_536_000_000)}y`;
 }
 
 export function formatDate(value, options = { dateStyle: 'medium' }) {

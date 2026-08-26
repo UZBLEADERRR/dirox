@@ -9,24 +9,60 @@ import { h, icon, mount, debounce } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { router } from '../lib/router.js';
-import { renderInShell } from '../components/shell.js';
+import { renderInShell, setSidebarSection } from '../components/shell.js';
 import { openModal, confirmModal } from '../components/modal.js';
 import { toast, toastError } from '../lib/toast.js';
 import { formatCost, formatCents, formatTokens, formatNumber, formatDuration, relativeTime, formatDate } from '../lib/format.js';
 
+/** Sections, with the icon each gets in the sidebar. */
 const SECTIONS = [
-  ['overview', 'Overview'],
-  ['users', 'Users'],
-  ['models', 'Models'],
-  ['providers', 'Providers'],
-  ['routing', 'Routing'],
-  ['playground', 'Playground'],
-  ['costs', 'Costs'],
-  ['plans', 'Plans'],
-  ['flags', 'Feature flags'],
-  ['logs', 'Audit log'],
-  ['system', 'System']
+  ['overview', 'Overview', 'chart'],
+  ['users', 'Users', 'user'],
+  ['models', 'Models', 'sparkle'],
+  ['providers', 'Providers', 'layers'],
+  ['routing', 'Routing', 'git'],
+  ['playground', 'Playground', 'terminal'],
+  ['costs', 'Costs', 'credit'],
+  ['plans', 'Plans', 'projects'],
+  ['flags', 'Feature flags', 'settings'],
+  ['logs', 'Audit log', 'tasks'],
+  ['system', 'System', 'shield']
 ];
+
+/** One line under each section title, saying what the section is for. */
+const SECTION_BLURBS = {
+  overview: 'Signups, activity, spend and health, at a glance.',
+  users: 'Who is on the platform, what they can do, and what they have used.',
+  models: 'Which models exist, what they cost, and which of them users may choose.',
+  providers: 'Upstream APIs and their credentials. Keys are written but never read back.',
+  routing: 'Which model answers which kind of request, by category and complexity.',
+  playground: 'Send a prompt to any model and see the real cost before you route to it.',
+  costs: 'Where the money went, by organization, model and day.',
+  plans: 'Limits and prices for each plan.',
+  flags: 'Features that can be turned on for everyone, or for one organization.',
+  logs: 'Every privileged action, who took it, and when.',
+  system: 'Version, queue depth, cache state and background jobs.'
+};
+
+/** A switch, for a setting that is on or off and saves as soon as it moves. */
+function toggle(checked, onChange) {
+  const element = h('button.switch', {
+    role: 'switch',
+    'aria-checked': String(Boolean(checked)),
+    onClick: async () => {
+      const next = element.getAttribute('aria-checked') !== 'true';
+      element.setAttribute('aria-checked', String(next));
+      try {
+        await onChange(next);
+      } catch (error) {
+        // Put it back: the control must never claim a state the server refused.
+        element.setAttribute('aria-checked', String(!next));
+        toastError(error);
+      }
+    }
+  });
+  return element;
+}
 
 const money = micros => formatCost(micros, { precise: true });
 
@@ -235,8 +271,15 @@ async function modelsSection() {
       h('td', h('div.row.row--wrap', { style: { gap: '3px' } },
         model.tiers.map(tier => h('span.badge', tier.replace('level', 'L'))))),
       h('td', model.enabled
-        ? h('span.badge.badge--success', 'enabled')
-        : h('span.badge', 'disabled')),
+        ? h('span.badge.badge--success', 'routing')
+        : h('span.badge', 'off')),
+      // Two different questions: may the router use it, and may a person pick
+      // it. The second is what the chat panel's model list is built from.
+      h('td', toggle(model.userSelectable, async next => {
+        await api.patch(`/admin/ai/models/${model.id}`, { userSelectable: next });
+        model.userSelectable = next;
+        toast.success(next ? `${model.name} is open to users.` : `${model.name} is no longer offered to users.`);
+      })),
       h('td', h('div.row', { style: { gap: '2px' } },
         h('button.btn.btn--ghost.btn--sm', { onClick: () => editModel(model, load) }, 'Edit'),
         h('button.btn.btn--ghost.btn--sm', {
@@ -250,15 +293,20 @@ async function modelsSection() {
         }, model.enabled ? 'Disable' : 'Enable')))
     ));
 
+    const open = models.filter(model => model.userSelectable).length;
+
     mount(container,
-      h('div.row.row--between', { style: { marginBottom: 'var(--s-4)' } },
-        h('p.muted', { style: { fontSize: 'var(--fs-sm)', margin: '0' } },
-          'Prices are per million tokens. Verify against the provider price list before enabling a model.'),
+      h('div.row.row--between', { style: { marginBottom: 'var(--s-4)', alignItems: 'flex-start' } },
+        h('div',
+          h('p.muted', { style: { fontSize: 'var(--fs-sm)', margin: '0' } },
+            'Prices are per million tokens. Verify against the provider price list before enabling a model.'),
+          h('p.subtle', { style: { fontSize: 'var(--fs-xs)', margin: 'var(--s-2) 0 0' } },
+            `Routing decides which model answers by default. Open to users decides what appears in the chat panel's model picker — ${open} of ${models.length} ${open === 1 ? 'is' : 'are'} open.`)),
         h('button.btn.btn--primary.btn--sm', { onClick: () => editModel(null, load) },
           icon('plus', { size: 13 }), 'Add model')),
       tableCard('Models', [
         ['Model'], ['Provider'], ['In / 1M', true], ['Out / 1M', true],
-        ['Context', true], ['Tiers'], ['Status'], ['']
+        ['Context', true], ['Tiers'], ['Routing'], ['Open to users'], ['']
       ], rows)
     );
   }
@@ -317,7 +365,13 @@ async function editModel(model, onSaved) {
             return h('label.row', { style: { gap: 'var(--s-2)', fontSize: 'var(--fs-sm)', cursor: 'pointer' } },
               input, h('span', key.replace('supports', '').replace(/([A-Z])/g, ' $1').trim()));
           }))),
-      field('priority', 'Priority', h('input.input', { type: 'number', value: String(model?.priority ?? 100) }), 'Lower is preferred.'))
+      field('priority', 'Priority', h('input.input', { type: 'number', value: String(model?.priority ?? 100) }), 'Lower is preferred.')),
+    h('div.field',
+      h('label.label', 'Availability'),
+      h('label.row', { style: { gap: 'var(--s-2)', fontSize: 'var(--fs-sm)', cursor: 'pointer' } },
+        (fields.userSelectable = h('input', { type: 'checkbox', checked: Boolean(model?.userSelectable) })),
+        h('span', 'Users may choose this model in the chat panel')),
+      h('p.field__hint', 'Off by default. A model can serve routing without being offered as a choice.'))
   );
 
   const save = h('button.btn.btn--primary', {
@@ -339,7 +393,8 @@ async function editModel(model, onSaved) {
           supportsTools: fields.supportsTools.checked,
           supportsVision: fields.supportsVision.checked,
           supportsReasoning: fields.supportsReasoning.checked,
-          supportsPromptCache: fields.supportsPromptCache.checked
+          supportsPromptCache: fields.supportsPromptCache.checked,
+          userSelectable: fields.userSelectable.checked
         };
         const cached = fields.cachedInputPriceMicros.value.trim();
         if (cached) payload.cachedInputPriceMicros = Number(cached);
@@ -895,22 +950,26 @@ export async function render({ params = {} } = {}) {
 
   renderInShell(content, { title: `Admin · ${label}`, crumbs: [['Admin', '/admin'], [label, null]] });
 
+  // Eleven sections is too many for a tab strip and exactly right for the
+  // sidebar, which is where the rest of the product's navigation already is.
+  setSidebarSection({
+    label: 'Administration',
+    items: SECTIONS.map(([id, sectionLabel, iconName]) => ({
+      href: id === 'overview' ? '/admin' : `/admin/${id}`,
+      label: sectionLabel,
+      icon: iconName
+    }))
+  });
+
   const panel = h('div', h('div.skeleton', { style: { height: '300px' } }));
 
   mount(content,
     h('div.page-head',
       h('div.page-head__row',
         h('div',
-          h('h1.page-head__title', { style: { fontSize: 'var(--fs-2xl)' } }, 'Platform administration'),
-          h('p.page-head__sub', 'Users, models, routing, cost and system health.')),
+          h('h1.page-head__title', { style: { fontSize: 'var(--fs-2xl)' } }, label),
+          h('p.page-head__sub', SECTION_BLURBS[active] || 'Users, models, routing, cost and system health.')),
         h('a.btn.btn--ghost.btn--sm', { href: '/app' }, icon('arrowRight', { size: 13 }), 'Back to DiroxCode'))),
-
-    h('nav.tabs', { style: { marginBottom: 'var(--s-6)' } },
-      SECTIONS.map(([id, sectionLabel]) => h('a.tab', {
-        href: `/admin/${id}`,
-        role: 'tab',
-        'aria-selected': String(id === active)
-      }, sectionLabel))),
 
     panel
   );

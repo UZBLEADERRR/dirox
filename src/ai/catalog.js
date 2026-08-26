@@ -49,6 +49,63 @@ export async function loadCatalog({ fresh = false } = {}) {
   }, CACHE_TTL);
 }
 
+/** Every tier, used when no plan narrows the set. */
+const TIER_LADDER = ['level0', 'level1', 'level2', 'level3', 'level4'];
+
+/**
+ * May a user's model preference be honoured?
+ *
+ * `enabled` and `user_selectable` answer different questions. `enabled` says
+ * the router may use a model at all — a cheap classifier model is enabled and
+ * has no business in anyone's picker. `user_selectable` says an administrator
+ * opened it to people. A preference is a request, not a permission, so it is
+ * checked here rather than trusted from the client.
+ *
+ * @param {object} model                a catalogue row
+ * @param {{allowedTiers?:string[], requireTools?:boolean, requireVision?:boolean}} [limits]
+ */
+export function preferenceAllowed(model, { allowedTiers = TIER_LADDER, requireTools = false, requireVision = false } = {}) {
+  if (!model) return false;
+  if (model.user_selectable !== true) return false;
+  if (requireTools && !model.supports_tools) return false;
+  if (requireVision && !model.supports_vision) return false;
+  const tiers = allowedTiers?.length ? allowedTiers : TIER_LADDER;
+  return Boolean(model.tiers?.some(tier => tiers.includes(tier)));
+}
+
+/**
+ * The models a person may choose in the chat panel.
+ *
+ * Two gates, both of which must open: an administrator marked the model
+ * `user_selectable`, and the organization's plan reaches its tier. Anything
+ * else stays invisible rather than being offered and then refused.
+ *
+ * @param {{allowedTiers?: string[]}} [options]
+ */
+export async function selectableModels({ allowedTiers } = {}) {
+  const catalog = await loadCatalog();
+  const tiers = allowedTiers?.length ? allowedTiers : null;
+
+  return catalog.models
+    .filter(model => preferenceAllowed(model, tiers ? { allowedTiers: tiers } : {}))
+    .sort((a, b) => Number(a.input_price_micros) - Number(b.input_price_micros))
+    .map(model => ({
+      id: model.id,
+      name: model.name,
+      description: model.description,
+      providerCode: catalog.providers.get(model.provider_id)?.code ?? null,
+      tiers: model.tiers,
+      contextWindow: model.context_window,
+      maxOutput: model.max_output,
+      supportsVision: model.supports_vision,
+      supportsTools: model.supports_tools,
+      supportsReasoning: model.supports_reasoning,
+      // Shown so the choice is an informed one rather than a name in a list.
+      inputPriceMicros: Number(model.input_price_micros),
+      outputPriceMicros: Number(model.output_price_micros)
+    }));
+}
+
 export function invalidateCatalog() {
   caches.models.delete('catalog');
   caches.settings.delete('system:agent.defaults');

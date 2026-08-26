@@ -12,12 +12,15 @@ const state = {
   projects: [],
   project: null,          // active project detail
   conversation: null,
+  conversations: [],
   messages: [],
   task: null,             // active task
   activity: [],           // agent activity timeline for the active task
   notifications: [],
   unreadCount: 0,
   usage: null,
+  models: [],             // the models this user may choose; the admin decides
+  defaultModelId: null,
   capabilities: {},
   featureFlags: {},
   ui: {
@@ -96,8 +99,8 @@ export const store = {
   reset() {
     Object.assign(state, {
       ready: true, session: null, organizations: [], projects: [], project: null,
-      conversation: null, messages: [], task: null, activity: [],
-      notifications: [], unreadCount: 0, usage: null
+      conversation: null, conversations: [], messages: [], task: null, activity: [],
+      notifications: [], unreadCount: 0, usage: null, models: [], defaultModelId: null
     });
     notify();
   }

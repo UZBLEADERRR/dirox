@@ -1,15 +1,20 @@
 /**
- * The workspace: conversation, live agent activity, and the work panels.
+ * The chat: conversation, live agent activity, and the work panels.
  *
- * This is where the product lives. The interface stays quiet for a simple
- * question and reveals development panels only when the task involves code.
+ * This is the product, and it is what you land on after signing in. A project
+ * is optional — without one you can still ask DiroxCode anything, and the
+ * composer offers a project when you want it to touch real code. The file and
+ * change panels appear only once there is a repository to show.
+ *
+ * The interface stays quiet for a simple question and reveals development
+ * panels only when the task involves code.
  */
 
 import { h, icon, mount, clear, qs } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { router } from '../lib/router.js';
-import { renderInShell, setPanel } from '../components/shell.js';
+import { renderInShell, setPanel, clearPanel, refreshConversations } from '../components/shell.js';
 import { registerCommands, clearCommands } from '../components/palette.js';
 import { createComposer } from '../components/composer.js';
 import { createActivity } from '../components/activity.js';
@@ -148,35 +153,40 @@ async function openTreePanel(projectId) {
 export async function render({ params, query = {} }) {
   closeStream();
 
-  const projectId = params.id;
+  // A project is optional. `/app` is a chat with none; a project route binds
+  // the chat to that repository and turns on the file panels.
+  let projectId = params.id || null;
   const scroll = h('div.chat__scroll');
   const thread = h('div.chat__inner');
   scroll.appendChild(thread);
 
-  const chat = h('div.chat', scroll);
-  const view = h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: '0' } }, chat);
+  const view = h('div.chat', scroll);
 
-  renderInShell(view, { title: 'Chat', crumbs: [['Projects', '/app/projects'], ['…', null]] });
-  // The workspace fills the viewport rather than scrolling the page.
-  view.closest('.view')?.style.setProperty('overflow', 'hidden');
+  renderInShell(view, { title: 'Chat', fill: true });
+  clearPanel();
 
-  let project;
-  try {
-    const data = await api.get(`/projects/${projectId}`);
-    project = data.project;
-    store.set({ project });
-  } catch (error) {
-    toastError(error, 'Project could not be opened');
-    return router.navigate('/app/projects');
+  let project = null;
+  if (projectId) {
+    try {
+      const data = await api.get(`/projects/${projectId}`);
+      project = data.project;
+      store.set({ project });
+    } catch (error) {
+      toastError(error, 'Project could not be opened');
+      return router.navigate('/app/projects');
+    }
+
+    renderInShell(view, {
+      title: project.name,
+      crumbs: [[project.name, `/app/projects/${projectId}`], ['Chat', null]],
+      fill: true
+    });
+  } else {
+    store.set({ project: null });
   }
 
-  renderInShell(view, {
-    title: project.name,
-    crumbs: [['Projects', '/app/projects'], [project.name, `/app/projects/${projectId}`], ['Chat', null]]
-  });
-  view.closest('.view')?.style.setProperty('overflow', 'hidden');
-
-  const onFileClick = (path, line) => openFilePanel(projectId, path, line);
+  // Without a repository there is no file to open, so a citation is inert.
+  const onFileClick = (path, line) => { if (projectId) openFilePanel(projectId, path, line); };
 
   // ── conversation ──
   let conversation = null;
@@ -198,38 +208,64 @@ export async function render({ params, query = {} }) {
     } catch (error) {
       toastError(error, 'Conversation could not be loaded');
     }
+
+    // A conversation bound to a project belongs on that project's route,
+    // where the file panels work.
+    if (!projectId && conversation?.projectId) {
+      return router.navigate(`/app/projects/${conversation.projectId}/chat/${conversation.id}`, { replace: true });
+    }
   }
 
-  if (!thread.children.length) {
-    thread.appendChild(h('div.empty', { style: { paddingTop: 'var(--s-16)' } },
-      h('span', { style: { color: 'var(--accent)' } }, icon('sparkle', { size: 26 })),
-      h('div.empty__title', `Ask DiroxCode about ${project.name}`),
-      h('p.empty__body',
-        project.indexStatus === 'ready'
-          ? `${project.fileCount} files indexed. Describe what you want built, fixed or explained.`
-          : 'This project is still being indexed — you can ask questions, but retrieval will improve once it finishes.'),
-      h('div.row.row--wrap', { style: { justifyContent: 'center', marginTop: 'var(--s-4)' } },
-        ['Explain this codebase', 'Find and fix the failing test', 'Review my latest changes', 'Add authentication']
-          .map(suggestion => h('button.btn.btn--sm', {
-            onClick: () => { composer.setValue(suggestion); composer.focus(); }
-          }, suggestion)))
-    ));
+  if (!thread.children.length) thread.appendChild(welcome());
+
+  /** What you see before you have said anything. */
+  function welcome() {
+    const suggestions = project
+      ? ['Explain this codebase', 'Find and fix the failing test', 'Review my latest changes', 'Add authentication']
+      : ['Explain a piece of code I paste', 'Help me plan a feature', 'Review this error message', 'Connect a project'];
+
+    return h('div.chat__welcome',
+      h('span.chat__welcome-mark', icon('sparkle', { size: 24 })),
+      h('h1.chat__welcome-title', project ? project.name : 'What can I help you build?'),
+      h('p.chat__welcome-body',
+        project
+          ? (project.indexStatus === 'ready'
+              ? `${project.fileCount} files indexed. Describe what you want built, fixed or explained.`
+              : 'This project is still being indexed — ask away, and retrieval will improve once it finishes.')
+          : 'Ask anything. Choose a project below when you want DiroxCode to read or change real code.'),
+      h('div.chat__suggestions', suggestions.map(suggestion => h('button.btn.btn--sm', {
+        onClick: () => {
+          if (suggestion === 'Connect a project') return router.navigate('/app/projects');
+          composer.setValue(suggestion);
+          composer.focus();
+        }
+      }, suggestion)))
+    );
   }
 
   // ── composer ──
+  //
+  // On a project route the project is fixed and the picker is pointless; on
+  // `/app` it is the control that decides whether this turn can touch code.
   const composer = createComposer({
     mode: query.mode || conversation?.mode || 'agent',
-    placeholder: `Tell DiroxCode what you want to build in ${project.name}…`,
+    projectId,
+    showProjectPicker: !params.id,
+    placeholder: project
+      ? `Tell DiroxCode what you want to build in ${project.name}…`
+      : undefined,
     onSend: (text, options) => runTask(text, options),
     onStop: () => stopCurrent()
   });
   view.appendChild(composer.element);
 
   registerCommands('workspace', [
-    { id: 'files', group: 'Workspace', label: 'Show project files', icon: 'file', run: () => openTreePanel(projectId) },
-    { id: 'changes', group: 'Workspace', label: 'Show changed files', icon: 'layers', run: () => openChangesPanel(projectId, lastChangedFiles) },
-    { id: 'project', group: 'Workspace', label: 'Open project overview', icon: 'projects', run: () => router.navigate(`/app/projects/${projectId}`) },
-    { id: 'stop', group: 'Workspace', label: 'Stop the agent', icon: 'stop', hint: 'Esc', run: () => stopCurrent() }
+    ...(projectId ? [
+      { id: 'files', group: 'Chat', label: 'Show project files', icon: 'file', run: () => openTreePanel(projectId) },
+      { id: 'changes', group: 'Chat', label: 'Show changed files', icon: 'layers', run: () => openChangesPanel(projectId, lastChangedFiles) },
+      { id: 'project', group: 'Chat', label: 'Open project overview', icon: 'projects', run: () => router.navigate(`/app/projects/${projectId}`) }
+    ] : []),
+    { id: 'stop', group: 'Chat', label: 'Stop the agent', icon: 'stop', hint: 'Esc', run: () => stopCurrent() }
   ]);
 
   let lastChangedFiles = [];
@@ -246,10 +282,12 @@ export async function render({ params, query = {} }) {
     } catch (error) { toastError(error); }
   }
 
-  async function runTask(text, { mode, attachments }) {
-    // The empty state is replaced by the first real turn.
-    const empty = thread.querySelector('.empty');
-    if (empty) empty.remove();
+  async function runTask(text, { mode, attachments, projectId: chosenProjectId, modelId }) {
+    // On `/app` the project is chosen per turn; adopt it for this chat.
+    if (!params.id && chosenProjectId !== undefined) projectId = chosenProjectId;
+
+    // The welcome screen is replaced by the first real turn.
+    thread.querySelector('.chat__welcome')?.remove();
 
     // Attachments are appended to the objective as labelled context.
     let objective = text;
@@ -274,9 +312,13 @@ export async function render({ params, query = {} }) {
     // Conversation is created lazily, so a one-off question costs no row.
     if (!conversation) {
       try {
-        const created = await api.post('/conversations', { projectId, mode });
+        const created = await api.post('/conversations', { projectId: projectId || undefined, mode });
         conversation = created.conversation;
-        history.replaceState({}, '', `/app/projects/${projectId}/chat/${conversation.id}`);
+        history.replaceState({}, '', projectId
+          ? `/app/projects/${projectId}/chat/${conversation.id}`
+          : `/app/chat/${conversation.id}`);
+        // The sidebar's chat list is the main way back to this conversation.
+        refreshConversations();
       } catch { /* the task still runs without a conversation record */ }
     }
     if (conversation) {
@@ -287,8 +329,9 @@ export async function render({ params, query = {} }) {
     try {
       const created = await api.post('/tasks', {
         objective,
-        projectId,
+        projectId: projectId || undefined,
         conversationId: conversation?.id,
+        modelId: modelId || undefined,
         mode,
         background: mode === 'autopilot'
       });
@@ -401,7 +444,7 @@ export async function render({ params, query = {} }) {
       footParts.push(h('a', { href: `/app/tasks/${task.id}`, style: { fontSize: 'var(--fs-2xs)', color: 'var(--text-subtle)' } }, 'Task details'));
       mount(bubble.foot, footParts.flatMap((part, index) => index ? [h('span', '·'), part] : [part]));
 
-      if (lastChangedFiles.length) openChangesPanel(projectId, lastChangedFiles);
+      if (lastChangedFiles.length && projectId) openChangesPanel(projectId, lastChangedFiles);
       scrollToEnd();
     }
   }
