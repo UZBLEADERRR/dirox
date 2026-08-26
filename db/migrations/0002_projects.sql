@@ -171,7 +171,15 @@ create index if not exists file_dependencies_to_idx on file_dependencies (projec
 do $$
 begin
   if exists (select 1 from pg_available_extensions where name = 'vector') then
-    execute 'create extension if not exists vector';
+    -- Availability does not imply permission to create it, and semantic search
+    -- is optional: hybrid retrieval works on keywords and symbols without it.
+    begin
+      execute 'create extension if not exists vector';
+    exception when others then
+      raise notice 'vector extension unavailable (%); semantic search stays disabled', sqlerrm;
+      return;
+    end;
+
     execute $ddl$
       create table if not exists file_embeddings (
         id         uuid primary key default gen_random_uuid(),

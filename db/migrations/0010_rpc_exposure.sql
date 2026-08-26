@@ -73,8 +73,14 @@ begin
   end if;
 end $$;
 
--- PostgREST caches the schema; tell it to reload so the new functions resolve.
-notify pgrst, 'reload schema';
+-- PostgREST caches the schema; ask it to reload so the new functions resolve.
+-- Harmless where nothing is listening on that channel.
+do $$
+begin
+  notify pgrst, 'reload schema';
+exception when others then
+  null;
+end $$;
 
 -- ─── projects: read and write from the row's own column ─────────────────────
 -- `projects_read` resolved the organization by looking the project up by id,

@@ -48,15 +48,33 @@ async function applyMigrations() {
     }
     return result;
   } catch (error) {
-    // A schema that cannot be applied is not something to serve traffic on
-    // top of: the failure is reported and the process exits so the platform
-    // surfaces it as a failed deploy rather than a subtly broken one.
-    logger.error('migrations failed — refusing to start', {
-      message: error.message,
-      pgCode: error.details?.pgCode,
-      hint: error.details?.hint,
-      filename: error.details?.filename
+    // A schema that cannot be applied is not something to serve traffic on top
+    // of, so the process exits and the platform reports a failed deploy.
+    //
+    // The reason goes in the message itself, not only in structured fields:
+    // a hosting dashboard typically shows the message and nothing else, and a
+    // failed deploy that will not say why is close to useless.
+    const detail = error.details || {};
+    const parts = [
+      detail.filename ? `in ${detail.filename}` : null,
+      detail.pgCode ? `[${detail.pgCode}]` : null,
+      error.message
+    ].filter(Boolean);
+
+    logger.error(`migrations failed — refusing to start: ${parts.join(' ')}`, {
+      filename: detail.filename,
+      pgCode: detail.pgCode,
+      hint: detail.hint,
+      detail: detail.detail
     });
+
+    // Written plainly as well, because some log viewers render only the
+    // message field of a structured line and drop the rest.
+    process.stderr.write(`\nMigration failure\n  ${parts.join('\n  ')}\n`);
+    if (detail.detail) process.stderr.write(`  detail: ${detail.detail}\n`);
+    if (detail.hint) process.stderr.write(`  hint: ${detail.hint}\n`);
+    process.stderr.write('\nRun `npm run db:status` against the same DATABASE_URL to inspect it.\n\n');
+
     process.exit(1);
   }
 }

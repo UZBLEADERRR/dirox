@@ -4,8 +4,32 @@
 -- Run migrations in filename order in the Supabase SQL editor.
 -- Every statement is idempotent so re-running a migration is safe.
 
-create extension if not exists "pgcrypto";
-create extension if not exists "pg_trgm";
+-- On a managed platform these are normally installed already, sometimes into a
+-- dedicated schema, and the connecting role may not be allowed to create them.
+-- Being unable to create one is only fatal if it is genuinely absent, which is
+-- checked immediately afterwards.
+do $$
+begin
+  begin
+    create extension if not exists "pgcrypto";
+  exception when insufficient_privilege or duplicate_object then
+    raise notice 'pgcrypto could not be created here; assuming it is already installed';
+  end;
+
+  begin
+    create extension if not exists "pg_trgm";
+  exception when insufficient_privilege or duplicate_object then
+    raise notice 'pg_trgm could not be created here; assuming it is already installed';
+  end;
+end $$;
+
+-- gen_random_uuid() comes from pgcrypto and every table below depends on it.
+do $$
+begin
+  perform gen_random_uuid();
+exception when undefined_function then
+  raise exception 'pgcrypto is not available in this database. Enable it first: create extension pgcrypto;';
+end $$;
 
 -- ─── helpers ────────────────────────────────────────────────────────────────
 -- These are SECURITY DEFINER so RLS policies can call them without recursing
@@ -62,10 +86,21 @@ begin
   return new;
 end $$;
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function app.handle_new_user();
+-- Creating a trigger on auth.users requires ownership of that table, which a
+-- managed platform usually reserves for its own auth role. When it is refused
+-- the application still works: resolveAuth() creates a missing profile on first
+-- sign-in, which is the same outcome one turn later. So this is attempted and
+-- allowed to fail, rather than blocking the whole schema.
+do $$
+begin
+  drop trigger if exists on_auth_user_created on auth.users;
+  create trigger on_auth_user_created
+    after insert on auth.users
+    for each row execute function app.handle_new_user();
+exception
+  when insufficient_privilege or undefined_table then
+    raise notice 'auth.users trigger not installed (%). Profiles are created on first sign-in instead.', sqlerrm;
+end $$;
 
 -- Generic updated_at trigger reused by every mutable table.
 create or replace function app.touch_updated_at() returns trigger
