@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # There are no runtime dependencies, so there is nothing to install.
+      - name: Parse every source file
+        run: npm run check
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Boot the server and check health
+        run: |
+          npm start &
+          pid=$!
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3000/api/health > /dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -sf http://localhost:3000/api/health | tee /dev/stderr | grep -q '"ok":true'
+          kill $pid
+
+  database:
+    name: Schema and tenant isolation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      # Applies every migration to a clean database, asserts the resulting
+      # schema, and re-applies everything to prove idempotency.
+      - name: Verify migrations
+        env:
+          PGPASSWORD: postgres
+        run: ./scripts/verify-migrations.sh -h localhost -p 5432 -U postgres
+
+      # Two users in two organizations; proves neither can reach the other's data.
+      - name: Verify tenant isolation
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -f scripts/verify-rls.sql
