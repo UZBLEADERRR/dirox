@@ -11,6 +11,7 @@ import { createApp } from './app.js';
 import { config, configReport } from './config/env.js';
 import { logger } from './core/logger.js';
 import { drainObservability } from './modules/observability/audit.js';
+import { stopAllPreviews } from './exec/preview.js';
 import { startWorker, stopWorker } from './queue/worker.js';
 // Importing the job modules is what registers their handlers with the worker.
 import './modules/projects/service.js';
@@ -47,6 +48,7 @@ async function shutdown(signal) {
 
   server.close();
   await stopWorker().catch(() => {});
+  await stopAllPreviews().catch(() => {});
   await drainObservability();
   clearTimeout(force);
   process.exit(0);

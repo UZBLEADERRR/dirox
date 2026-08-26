@@ -18,6 +18,7 @@ import { TokenBudget, defaultBudgetFor } from '../context/budget.js';
 import { plannerPrompt } from './prompts.js';
 import { toolsFor, toolDefinitions, executeTool } from './tools/index.js';
 import { createCheckpoint } from './checkpoints.js';
+import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
 import { AppError, cancelled, quotaExceeded } from '../core/errors.js';
 import { logger } from '../core/logger.js';
@@ -222,7 +223,8 @@ export async function runTask(task, options) {
     const tools = toolsFor({
       mode: task.mode,
       featureFlags: options.featureFlags || {},
-      hasRepository: Boolean(project)
+      hasRepository: Boolean(project),
+      hasDevCommand: Boolean(project?.dev_command)
     });
 
     const maxIterations = Math.min(Number(task.max_iterations) || defaults.max_iterations, 40);
@@ -452,6 +454,35 @@ export async function runTask(task, options) {
       }
     }
 
+    // ── 7b. review ───────────────────────────────────────────────────────────
+    let review = null;
+    if (changedFiles.length && !budget.exhausted &&
+        (task.mode === 'review' || options.autoReview === true) &&
+        options.featureFlags?.code_review !== false) {
+      review = await step(PHASES.REVIEW, 'Reviewing the changes', async () => {
+        const result = await reviewChange({
+          projectId: project.id, taskId: task.id, orgId: auth.org.id, userId: auth.user.id,
+          project, changedFiles, allowedTiers: options.allowedTiers,
+          level: classification.level === 'level0' ? 'level2' : classification.level,
+          signal
+        });
+        budget.record(result.costMicros, 'review');
+        return {
+          summary: summariseFindings(result.findings),
+          detail: { findings: result.findings.length },
+          value: result
+        };
+      }).then(result => result.value).catch(() => null);
+
+      if (review?.findings.length) {
+        emit('review', { findings: review.findings, summary: summariseFindings(review.findings) });
+        const critical = review.findings.filter(finding => ['critical', 'high'].includes(finding.severity));
+        if (critical.length) {
+          emit('notice', { level: 'warning', message: `${critical.length} high-severity finding${critical.length === 1 ? '' : 's'} in this change.` });
+        }
+      }
+    }
+
     if (iteration >= maxIterations && !finalText) {
       finalText = `I reached the ${maxIterations}-step limit for this task without finishing. ${changedFiles.length ? `${changedFiles.length} files were changed — review them before continuing.` : 'No files were changed.'}`;
     }
@@ -461,6 +492,7 @@ export async function runTask(task, options) {
       summary: finalText || 'Task completed.',
       changedFiles,
       validation: validation ? { passed: validation.ok, summary: validation.metadata?.summary } : null,
+      review: review ? { findings: review.findings.length, summary: summariseFindings(review.findings) } : null,
       plan,
       model: currentRoute.model.name,
       escalations: state.escalations

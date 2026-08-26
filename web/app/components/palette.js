@@ -140,20 +140,36 @@ export function openCommandPalette({ mode = 'all', initialQuery = '' } = {}) {
     renderList();
   }
 
-  /** Project file search adds results asynchronously when a project is open. */
-  const searchFiles = debounce(async query => {
+  /**
+   * Global search runs alongside the local command filter, so the palette finds
+   * projects, files, symbols, tasks and conversations — not just commands.
+   */
+  const GROUP_FOR = { project: 'Projects', file: 'Files', symbol: 'Symbols', task: 'Tasks', conversation: 'Conversations' };
+  const ICON_FOR = { project: 'folder', file: 'file', symbol: 'layers', task: 'tasks', conversation: 'chat' };
+
+  const searchRemote = debounce(async query => {
+    if (query.length < 2) return;
     const projectId = store.state.project?.id;
-    if (!projectId || query.length < 2) return;
     try {
-      const { files } = await api.get(`/projects/${projectId}/files?q=${encodeURIComponent(query)}&limit=12`);
-      const fileCommands = files.map(file => ({
-        id: `file:${file.path}`, group: 'Files', label: file.path, icon: 'file',
-        run: () => router.navigate(`/app/projects/${projectId}?file=${encodeURIComponent(file.path)}`)
-      }));
-      commands = [...commands.filter(c => c.group !== 'Files'), ...fileCommands];
+      const { results } = await api.get(
+        `/search?q=${encodeURIComponent(query)}${projectId ? `&projectId=${projectId}` : ''}&limit=6`);
+
+      const remote = Object.values(results).flat()
+        .filter(item => item.href)
+        .map(item => ({
+          id: `${item.type}:${item.id || item.title}`,
+          group: GROUP_FOR[item.type] || 'Results',
+          label: item.title,
+          hint: item.subtitle || '',
+          icon: ICON_FOR[item.type] || 'arrowRight',
+          remote: true,
+          run: () => router.navigate(item.href)
+        }));
+
+      commands = [...commands.filter(command => !command.remote), ...remote];
       applyFilter(input.value.trim());
-    } catch { /* file search is a convenience; failure is silent */ }
-  }, 180);
+    } catch { /* search is a convenience; a failure leaves local commands working */ }
+  }, 200);
 
   function execute(command) {
     close();
@@ -169,7 +185,7 @@ export function openCommandPalette({ mode = 'all', initialQuery = '' } = {}) {
   input.addEventListener('input', () => {
     const query = input.value.trim();
     applyFilter(query);
-    searchFiles(query);
+    searchRemote(query);
   });
 
   input.addEventListener('keydown', event => {

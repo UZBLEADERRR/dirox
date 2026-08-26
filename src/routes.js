@@ -19,6 +19,7 @@ import { githubRoutes } from './modules/projects/github.routes.js';
 import { adminRoutes } from './modules/admin/routes.js';
 import { taskRoutes } from './modules/agent/task.routes.js';
 import { conversationRoutes } from './modules/agent/conversation.routes.js';
+import { searchRoutes } from './modules/search/routes.js';
 
 export function registerRoutes(router) {
   const api = new Router();
@@ -40,6 +41,7 @@ export function registerRoutes(router) {
   api.use('/github', githubRoutes());
   api.use('/tasks', taskRoutes());
   api.use('/conversations', conversationRoutes());
+  api.use('/search', searchRoutes());
   api.use('/notifications', notificationRoutes());
   api.use('/billing', billingRoutes());
   api.use('/admin', adminRoutes());

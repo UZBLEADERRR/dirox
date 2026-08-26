@@ -15,6 +15,7 @@ import { fileTools } from './files.js';
 import { terminalTools } from './terminal.js';
 import { gitTools } from './git.js';
 import { projectTools } from './project.js';
+import { previewTools } from './preview.js';
 import { parse, toJsonSchema } from '../../core/validate.js';
 import { AppError, badRequest, forbidden, notFound, timedOut, toAppError } from '../../core/errors.js';
 import { decide, describeApproval, RISK } from '../permissions.js';
@@ -23,7 +24,7 @@ import { serviceClient, hasServiceRole } from '../../db/supabase.js';
 import { runtimeStats } from '../../modules/observability/audit.js';
 import { logger } from '../../core/logger.js';
 
-const ALL_TOOLS = [...fileTools, ...terminalTools, ...gitTools, ...projectTools];
+const ALL_TOOLS = [...fileTools, ...terminalTools, ...gitTools, ...projectTools, ...previewTools];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -34,7 +35,9 @@ const DEFAULT_TIMEOUT_MS = 180_000;
  * Read-only modes get read-only tools — not by convention but by construction,
  * so a model in review mode has no write tool to call in the first place.
  */
-export function toolsFor({ mode = 'agent', featureFlags = {}, hasRepository = false } = {}) {
+const PREVIEW_TOOL_NAMES = new Set(previewTools.map(tool => tool.name));
+
+export function toolsFor({ mode = 'agent', featureFlags = {}, hasRepository = false, hasDevCommand = false } = {}) {
   let tools = ALL_TOOLS;
 
   if (mode === 'ask' || mode === 'review' || mode === 'plan') {
@@ -48,6 +51,11 @@ export function toolsFor({ mode = 'agent', featureFlags = {}, hasRepository = fa
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));
+  }
+  // The preview agent needs a dev server; without one the tools would only
+  // ever return an error, so they are not offered at all.
+  if (featureFlags.visual_agent === false || !hasDevCommand) {
+    tools = tools.filter(tool => !PREVIEW_TOOL_NAMES.has(tool.name));
   }
 
   return tools;
