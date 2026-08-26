@@ -1,0 +1,86 @@
+/**
+ * Central environment configuration.
+ *
+ * Every environment variable the platform reads is declared here exactly once,
+ * so a missing or misconfigured variable surfaces as a clear boot-time report
+ * instead of an obscure runtime failure deep inside a request.
+ */
+
+const bool = (value, fallback = false) => {
+  if (value === undefined || value === '') return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value));
+};
+const int = (value, fallback) => {
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+const list = value => String(value || '').split(',').map(s => s.trim()).filter(Boolean);
+
+const env = process.env;
+
+export const config = {
+  env: env.NODE_ENV || 'development',
+  isProduction: (env.NODE_ENV || 'development') === 'production',
+  port: int(env.PORT, 3000),
+  appUrl: (env.APP_URL || '').replace(/\/$/, ''),
+  corsOrigins: list(env.CORS_ORIGINS),
+
+  supabase: {
+    url: (env.SUPABASE_URL || '').replace(/\/$/, ''),
+    anonKey: env.SUPABASE_ANON_KEY || '',
+    serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || ''
+  },
+
+  encryptionKey: env.DIROX_ENCRYPTION_KEY || '',
+
+  github: {
+    clientId: env.GITHUB_CLIENT_ID || '',
+    clientSecret: env.GITHUB_CLIENT_SECRET || '',
+    callback: env.GITHUB_OAUTH_CALLBACK || ''
+  },
+
+  stripe: {
+    secretKey: env.STRIPE_SECRET_KEY || '',
+    webhookSecret: env.STRIPE_WEBHOOK_SECRET || ''
+  },
+
+  sandbox: {
+    enabled: bool(env.SANDBOX_ENABLED, true),
+    workspaceRoot: env.WORKSPACE_ROOT || '/tmp/diroxcode-workspaces',
+    timeoutMs: int(env.SANDBOX_TIMEOUT_MS, 120_000),
+    maxOutput: int(env.SANDBOX_MAX_OUTPUT, 20_000)
+  },
+
+  /** Provider secrets are read by reference (`key_ref`), never by hardcoded name. */
+  providerKey(ref) {
+    if (!ref || !/^[A-Z0-9_]+$/.test(ref)) return '';
+    return env[ref] || '';
+  }
+};
+
+/** Capabilities the platform can honestly offer with the current configuration. */
+export function capabilities() {
+  return {
+    database: Boolean(config.supabase.url && config.supabase.anonKey),
+    systemWrites: Boolean(config.supabase.serviceKey),
+    encryption: config.encryptionKey.length >= 16,
+    github: Boolean(config.github.clientId && config.github.clientSecret),
+    billing: Boolean(config.stripe.secretKey),
+    sandbox: config.sandbox.enabled
+  };
+}
+
+/** Non-fatal boot report: the server starts degraded rather than refusing to run. */
+export function configReport() {
+  const caps = capabilities();
+  const warnings = [];
+  if (!caps.database) warnings.push('SUPABASE_URL / SUPABASE_ANON_KEY missing — auth and persistence are disabled.');
+  if (!caps.systemWrites) warnings.push('SUPABASE_SERVICE_ROLE_KEY missing — admin and system writes are disabled.');
+  if (!caps.encryption) warnings.push('DIROX_ENCRYPTION_KEY missing — provider keys cannot be stored encrypted.');
+  if (!caps.github) warnings.push('GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing — GitHub integration is disabled.');
+  if (!caps.billing) warnings.push('STRIPE_SECRET_KEY missing — billing runs in read-only plan mode.');
+  if (config.isProduction && !config.corsOrigins.length) warnings.push('CORS_ORIGINS is empty in production — browser calls from other origins will be rejected.');
+  return { capabilities: caps, warnings };
+}
+
+export default config;

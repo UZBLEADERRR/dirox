@@ -1,60 +1,142 @@
-# DiroX
+# DiroxCode
 
-DiroX is a minimalist mobile-first AI workspace for building large projects with Daho Code agent skills.
+**Your AI Software Engineer.**
+
+DiroxCode is a production-grade AI software engineering platform. You connect a
+project, describe what you want in plain language, and an autonomous agent
+plans the work, retrieves only the code it actually needs, edits files, runs
+tests, fixes what it broke, reviews the result and reports back — with the
+cost and token usage of the whole run.
+
+It is not a chat window with a code block. It is an agent with tools,
+boundaries, a budget and an audit trail.
+
+---
+
+## What makes it different
+
+**Token efficiency is an architectural constraint, not a setting.**
+Repositories are indexed into files, symbols and an import graph. Hybrid
+retrieval (exact + keyword + symbol + dependency + recency) selects a small,
+ranked, deduplicated context for each task. Whole repositories are never sent
+to a model.
+
+**The cheapest capable model wins.** Every request is classified into one of
+five complexity levels and routed by an admin-editable rule table. Escalation
+to a stronger model happens only after a measured failure, never speculatively.
+
+**Every task has a budget.** The agent knows what it has spent and what remains.
+As the budget tightens it compresses context, drops to a cheaper model and stops
+redundant retries rather than silently burning money.
+
+**Repository content is data, never instructions.** System policy, developer
+policy, user intent, repository text and tool output are separated at the prompt
+boundary. A README cannot tell the agent to exfiltrate a key.
+
+---
 
 ## Architecture
-- **Frontend:** static `index.html`, `style.css`, `app.js`; deploy to GitHub Pages.
-- **Backend:** `api/server.js`; deploy to Railway. It must not run on the phone.
-- **AI:** OpenRouter proxy; never expose the API key in frontend code.
-- **Data/auth:** Supabase Auth, `projects`, and `chats` tables.
-- **Skill source:** only `UZBLEADERRR/Daho`, branch `claude/manashu-web-version-wclci1`, `design/dahocode` flow. No other repository is used.
 
-## Supabase setup
-Run this once in Supabase SQL Editor:
+```
+web/                     Single-page client (ES modules, no build step)
+  styles/                Design tokens, components, layout, workspace
+  app/lib/               api client, store, router, dom, formatting
+  app/components/        shell, command palette, brand
+  app/pages/             landing, auth, home, projects, workspace, admin…
+
+src/                     Node server (zero runtime dependencies)
+  config/                Environment and capability reporting
+  core/                  http kernel, errors, logger, validation, cache,
+                         rate limiting, crypto
+  db/                    Supabase/PostgREST client (user-scoped + service role)
+  modules/               auth, users, orgs, projects, agent, billing, admin,
+                         notifications, observability
+  ai/                    Provider adapters, gateway, model router, pricing
+  agent/                 Orchestrator, planner, tools, permissions, checkpoints
+  context/               Indexer, symbols, retrieval, summarisation, budget
+  exec/                  Sandboxed command execution and workspace isolation
+  queue/                 Postgres-backed job queue and worker
+
+db/migrations/           Ordered, idempotent SQL — schema, RLS, seed data
+docs/                    Architecture, security model, deployment, roadmap
+tests/                   node:test suites
+```
+
+One process serves the API, the static client and the job worker. Set
+`WORKER_ENABLED=false` to run web and worker as separate Railway services when
+you outgrow a single instance.
+
+---
+
+## Deployment
+
+DiroxCode runs on **Supabase** (Postgres, Auth, Row Level Security) and
+**Railway** (the Node service). See [`docs/DEPLOY.md`](docs/DEPLOY.md) for the
+full walkthrough.
+
+### 1. Supabase
+
+Run the migrations in `db/migrations/` in filename order in the SQL editor.
+They are idempotent, so re-running one is safe.
+
+Then grant yourself admin access:
 
 ```sql
-create table if not exists projects (id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id) on delete cascade, name text not null, brief text default '', files jsonb default '[]', created_at timestamptz default now());
-create table if not exists chats (id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id) on delete cascade, project_id uuid references projects(id) on delete cascade, role text not null, content text not null, created_at timestamptz default now());
-create table if not exists tasks (id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id) on delete cascade, project_id uuid references projects(id) on delete cascade, title text not null, description text default '', status text not null default 'pending', state jsonb default '{}', created_at timestamptz default now());
-create table if not exists admin_users (user_id uuid primary key references auth.users(id) on delete cascade, created_at timestamptz default now());
-create table if not exists admin_settings (key text primary key, value text not null default '', updated_at timestamptz default now());
--- Birinchi administratorni qo‘shish: email o‘rniga Supabase Auth user UUID yozing.
--- insert into admin_users(user_id) values ('USER_UUID');
-alter table projects enable row level security; alter table chats enable row level security; alter table tasks enable row level security; alter table admin_users enable row level security; alter table admin_settings enable row level security;
-create policy "admins read own row" on admin_users for select using (auth.uid()=user_id);
-create policy "any signed user reads model settings" on admin_settings for select using (auth.uid() is not null);
-create policy "admins manage settings" on admin_settings for all using (exists (select 1 from admin_users where user_id=auth.uid())) with check (exists (select 1 from admin_users where user_id=auth.uid()));
-create policy "user projects" on projects for all using (auth.uid()=user_id) with check (auth.uid()=user_id);
-create policy "user chats" on chats for all using (auth.uid()=user_id) with check (auth.uid()=user_id);
-create policy "user tasks" on tasks for all using (auth.uid()=user_id) with check (auth.uid()=user_id);
+insert into platform_admins (user_id, role)
+values ('<your-auth-user-uuid>', 'superadmin');
 ```
 
-## Railway variables
-Set these in Railway:
-- `OPENROUTER_API_KEY` — secret OpenRouter key
-- `OPENROUTER_MODEL` — optional; default `openai/gpt-4o-mini`
-- `SUPABASE_URL` — Supabase project URL
-- `SUPABASE_ANON_KEY` — Supabase anon key
-- `FRONTEND_URL` — deployed GitHub Pages URL
-- `PORT` — Railway provides this automatically
+### 2. Railway
 
-## Admin panel
-Run the SQL above, then add the first admin with `insert into admin_users(user_id) values ('SUPABASE_AUTH_USER_UUID');`. Sign in to DiroX with that account; the Admin navigation item appears automatically. Admin UI is Uzbek. Model routing is configured there and stored in `admin_settings`; normal DiroX UI is English. The OpenRouter API key is never returned to the browser and remains only in Railway as `OPENROUTER_API_KEY`. Users may write in any language; the agent is instructed to reply in the user's language.
+Deploy this repository. `npm start` is the start command and `/api/health` is
+the health check. Set the environment variables from
+[`.env.example`](.env.example) — at minimum:
 
-Start command: `npm start`
+| Variable | Purpose |
+| --- | --- |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_ANON_KEY` | Public anon key (RLS applies) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only. System writes, admin, queue |
+| `DIROX_ENCRYPTION_KEY` | 32-byte base64 key for secrets at rest |
+| `APP_URL` | Public URL, used for OAuth redirects |
+| `CORS_ORIGINS` | Comma-separated allowed browser origins |
+| `OPENROUTER_API_KEY` | Or any other provider key referenced by `key_ref` |
 
-## Connect frontend
-Before deploying, define the Railway URL in a small script before `app.js`:
+The server starts even when optional integrations are missing: it reports
+degraded capabilities at boot and the UI disables what is unavailable instead
+of pretending it works.
 
-```html
-<script>window.DIROX_API_URL='https://your-app.up.railway.app'</script>
-<script src="app.js"></script>
+### 3. First run
+
+Sign up, connect a repository, and give DiroxCode a task.
+
+---
+
+## Security
+
+- Row Level Security on every tenant table; organization ids from the client are
+  always re-verified against membership.
+- Provider keys, GitHub tokens and billing secrets never reach the browser.
+  Secrets at rest are AES-256-GCM encrypted.
+- Access tokens are held in memory by the client; the refresh token is an
+  HttpOnly, SameSite=Strict cookie.
+- Commands run against an allowlist inside an isolated workspace with CPU,
+  memory, output and time limits. Destructive operations require approval.
+- Sign-ins, model changes, Git operations, billing changes and admin actions
+  are audited.
+
+Full model: [`docs/SECURITY.md`](docs/SECURITY.md).
+
+---
+
+## Development
+
+```bash
+npm start          # serve API + client on :3000
+npm run dev        # same, with --watch
+npm test           # node:test suites
+npm run check      # syntax check every source file
 ```
 
-Without this URL the UI works in local demo mode, but real Supabase auth and OpenRouter responses require Railway.
-
-## Local test
-Run `npm start`, then open the static frontend with a local static server. Check `GET /health` and use the browser test. Node backend is server-only.
-
-## Deploy
-Push the project to GitHub, enable Pages from the `main` branch root, and deploy the backend separately on Railway. Keep all API keys in Railway environment variables.
+There is no build step and no runtime dependency tree. Node 20+ is the only
+requirement.

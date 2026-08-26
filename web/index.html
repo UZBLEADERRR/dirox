@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DiroxCode — Your AI Software Engineer</title>
+<meta name="description" content="DiroxCode understands your codebase, plans the work, writes the code, runs the tests and reviews the result. An autonomous AI software engineer built to be token efficient.">
+<meta name="theme-color" content="#050506">
+<meta name="color-scheme" content="dark light">
+
+<meta property="og:title" content="DiroxCode — Your AI Software Engineer">
+<meta property="og:description" content="Describe the task. DiroxCode reads only what it needs, builds, tests and reports back.">
+<meta property="og:type" content="website">
+
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/logo.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="stylesheet" href="/styles/tokens.css">
+<link rel="stylesheet" href="/styles/base.css">
+<link rel="stylesheet" href="/styles/components.css">
+<link rel="stylesheet" href="/styles/layout.css">
+<link rel="stylesheet" href="/styles/marketing.css">
+<link rel="stylesheet" href="/styles/workspace.css">
+
+<script>
+  // Apply the saved theme before first paint so the app never flashes.
+  try {
+    var saved = JSON.parse(localStorage.getItem('diroxcode.ui') || '{}');
+    if (saved.theme === 'light' || saved.theme === 'dark') document.documentElement.dataset.theme = saved.theme;
+  } catch (e) {}
+</script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="root" aria-busy="true">
+    <div class="boot">
+      <div class="boot__mark" aria-hidden="true"></div>
+      <p class="boot__text">Starting DiroxCode…</p>
+    </div>
+  </div>
+  <noscript>
+    <div style="padding:3rem;max-width:40rem;margin:0 auto;font-family:system-ui">
+      <h1>DiroxCode needs JavaScript</h1>
+      <p>The workspace is an interactive application. Enable JavaScript to continue.</p>
+    </div>
+  </noscript>
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

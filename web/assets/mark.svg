@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-label="DiroxCode">
+  <!-- Outer crescent: the brand red arc -->
+  <path d="M31 4a20 20 0 1 0 0 40 16 16 0 1 1 0-40Z" fill="currentColor"/>
+  <!-- Four-point star: the point of focus -->
+  <path d="M33 17.5 34.9 22.6 40 24.5 34.9 26.4 33 31.5 31.1 26.4 26 24.5 31.1 22.6Z" fill="currentColor"/>
+</svg>

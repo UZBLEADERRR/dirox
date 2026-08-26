@@ -1,0 +1,12 @@
+{
+  "name": "DiroxCode — Your AI Software Engineer",
+  "short_name": "DiroxCode",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#050506",
+  "theme_color": "#050506",
+  "icons": [
+    { "src": "/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/assets/logo.png", "sizes": "1242x1242", "type": "image/png", "purpose": "any" }
+  ]
+}
