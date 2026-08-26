@@ -142,6 +142,14 @@ export async function resolveAuth(req) {
   if (profile?.suspended_at) throw forbidden('This account has been suspended');
   if (org?.suspended_at) throw forbidden('This organization has been suspended');
 
+  // Revoking a device from the security page ends that session, rather than
+  // only hiding it from a list.
+  const { isRevoked } = await import('../users/presence.js');
+  if (await isRevoked(user.id, accessToken)) {
+    identityCache.delete(`tok:${fingerprint(accessToken)}`);
+    throw unauthorized('This session was signed out from another device');
+  }
+
   const isAdmin = await isPlatformAdmin(user.id, accessToken);
 
   return {

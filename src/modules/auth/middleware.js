@@ -9,6 +9,7 @@
 
 import { forbidden, unauthorized } from '../../core/errors.js';
 import { resolveAuth } from './service.js';
+import { touch } from '../users/presence.js';
 
 export const AUTH_LEVELS = ['optional', 'user', 'write', 'orgAdmin', 'platformAdmin'];
 
@@ -32,6 +33,14 @@ export async function applyAuth(ctx, requirement) {
 
   ctx.auth = auth;
   ctx.log = ctx.log.child({ userId: auth.user.id, orgId: auth.org?.id });
+
+  // Throttled internally, and never awaited: presence must not slow a request.
+  touch({
+    userId: auth.user.id,
+    accessToken: auth.accessToken,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent
+  });
 
   switch (level) {
     case 'write':

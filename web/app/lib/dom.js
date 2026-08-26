@@ -5,6 +5,10 @@
  * `h()`, which escapes text by construction — a string is only ever set through
  * `textContent`, never `innerHTML`. That removes a whole class of XSS from
  * rendering model output and repository content.
+ *
+ * There is deliberately no raw-markup escape hatch. An unused one is still a
+ * foothold, and every case that seemed to need one was better served by
+ * building nodes.
  */
 
 /**
@@ -27,7 +31,6 @@ export function h(tag, props, ...children) {
       if (key === 'class' || key === 'className') element.classList.add(...String(value).split(/\s+/).filter(Boolean));
       else if (key === 'style' && typeof value === 'object') Object.assign(element.style, value);
       else if (key === 'dataset') Object.assign(element.dataset, value);
-      else if (key === 'html') element.innerHTML = value;             // callers must pass trusted markup only
       else if (key.startsWith('on') && typeof value === 'function') element.addEventListener(key.slice(2).toLowerCase(), value);
       else if (key === 'ref' && typeof value === 'function') value(element);
       else if (value === true) element.setAttribute(key, '');

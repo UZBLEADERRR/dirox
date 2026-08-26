@@ -5,10 +5,11 @@
 
 import { Router, sendJson } from '../../core/http.js';
 import { parse, t, uuid } from '../../core/validate.js';
-import { badRequest, forbidden, notConfigured } from '../../core/errors.js';
+import { badRequest, forbidden, notConfigured, notFound } from '../../core/errors.js';
 import { hasServiceRole, serviceClient } from '../../db/supabase.js';
 import { audit } from '../observability/audit.js';
 import { invalidateIdentity } from '../auth/service.js';
+import { forget } from './presence.js';
 
 const aiPreferences = t.object({
   defaultModelId: t.string({ max: 40 }),
@@ -122,9 +123,18 @@ export function userRoutes() {
 
   router.delete('/sessions/:id', async ctx => {
     const id = parse(uuid({ required: true }), ctx.params.id);
-    await ctx.auth.db.from('user_sessions').eq('id', id).eq('user_id', ctx.auth.user.id)
+    const [row] = await ctx.auth.db.from('user_sessions').eq('id', id).eq('user_id', ctx.auth.user.id)
       .update({ revoked_at: new Date().toISOString() });
-    audit.record({ actorId: ctx.auth.user.id, action: 'session.revoked', resource: 'session', resourceId: id, severity: 'warning' });
+    if (!row) throw notFound('Session not found');
+
+    // Clear the cached revocation answer so the change takes effect at once
+    // rather than after the cache expires.
+    forget(ctx.auth.user.id, null);
+
+    audit.record({
+      actorId: ctx.auth.user.id, action: 'session.revoked',
+      resource: 'session', resourceId: id, severity: 'warning', ip: ctx.ip
+    });
     return sendJson(ctx.res, 200, { ok: true });
   }, { auth: true });
 
