@@ -76,8 +76,16 @@ full walkthrough.
 
 ### 1. Supabase
 
-Run the migrations in `db/migrations/` in filename order in the SQL editor.
-They are idempotent, so re-running one is safe.
+Create a project, then give the server its connection string — from
+**Project Settings → Database → Connection string → Session pooler**:
+
+```
+DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+The server applies its own migrations on boot and refuses to start if one
+fails, so there is no SQL to paste and a deploy never serves traffic against a
+half-built schema. `npm run db:status` shows what is applied.
 
 Then grant yourself admin access:
 
@@ -97,6 +105,7 @@ the health check. Set the environment variables from
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Public anon key (RLS applies) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only. System writes, admin, queue |
+| `DATABASE_URL` | Session-pooler string; lets the server apply its own migrations |
 | `DIROX_ENCRYPTION_KEY` | 32-byte base64 key for secrets at rest |
 | `APP_URL` | Public URL, used for OAuth redirects |
 | `CORS_ORIGINS` | Comma-separated allowed browser origins |
@@ -134,8 +143,10 @@ Full model: [`docs/SECURITY.md`](docs/SECURITY.md).
 ```bash
 npm start          # serve API + client on :3000
 npm run dev        # same, with --watch
-npm test           # 79 unit and integration tests
+npm test           # 88 unit and integration tests
 npm run check      # parse every source file
+npm run db:status  # what is applied, what is pending
+npm run db:migrate # apply pending migrations
 npm run db:print   # emit all migrations in order
 ```
 

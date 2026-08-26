@@ -31,6 +31,18 @@ export const config = {
     serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || ''
   },
 
+  /**
+   * Direct Postgres connection, used only to apply migrations.
+   *
+   * Separate from the Supabase REST credentials on purpose: this is the one
+   * place the application talks to the database over the wire protocol, and it
+   * is not used to serve any request.
+   */
+  database: {
+    url: env.DATABASE_URL || '',
+    migrateOnBoot: bool(env.MIGRATE_ON_BOOT, true)
+  },
+
   encryptionKey: env.DIROX_ENCRYPTION_KEY || '',
 
   github: {
@@ -62,6 +74,7 @@ export const config = {
 export function capabilities() {
   return {
     database: Boolean(config.supabase.url && config.supabase.anonKey),
+    migrations: Boolean(config.database.url),
     systemWrites: Boolean(config.supabase.serviceKey),
     encryption: config.encryptionKey.length >= 16,
     github: Boolean(config.github.clientId && config.github.clientSecret),
@@ -75,6 +88,7 @@ export function configReport() {
   const caps = capabilities();
   const warnings = [];
   if (!caps.database) warnings.push('SUPABASE_URL / SUPABASE_ANON_KEY missing — auth and persistence are disabled.');
+  if (!caps.migrations) warnings.push('DATABASE_URL missing — the schema must be applied manually. Set it to have the server keep the schema current.');
   if (!caps.systemWrites) warnings.push('SUPABASE_SERVICE_ROLE_KEY missing — admin and system writes are disabled.');
   if (!caps.encryption) warnings.push('DIROX_ENCRYPTION_KEY missing — provider keys cannot be stored encrypted.');
   if (!caps.github) warnings.push('GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing — GitHub integration is disabled.');

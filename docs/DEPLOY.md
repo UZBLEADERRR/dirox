@@ -22,9 +22,43 @@ The service role key bypasses Row Level Security. DiroxCode uses it only for
 system writes (usage records, audit logs, the job queue) and for admin routes
 that have already passed an explicit platform-admin check.
 
-### Run the migrations
+### The schema
 
-In the SQL editor, run every file in `db/migrations/` **in filename order**:
+**The server applies its own migrations.** Set `DATABASE_URL` and it provisions
+the schema on boot, applies anything new on each deploy, and refuses to start if
+a migration fails — so a deploy never serves traffic against a half-built
+database.
+
+From **Project Settings → Database → Connection string**, take the **Session
+pooler** string (port 5432) or the direct connection:
+
+```
+DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+> Not the **transaction pooler** on port 6543. It gives each statement a
+> different backend, so transactions and advisory locks do not hold. The runner
+> detects that port and tells you rather than failing part-way through.
+
+You can also drive it by hand:
+
+```bash
+npm run db:status      # what is applied, what is pending
+npm run db:migrate     # apply everything pending
+node scripts/migrate.js --dry-run
+```
+
+Applied files are recorded in `schema_migrations` with a checksum, so re-running
+is a no-op and editing a file that has already been applied is reported rather
+than silently ignored.
+
+<details>
+<summary>Or paste the SQL yourself</summary>
+
+If you would rather not give the server a database password, set
+`MIGRATE_ON_BOOT=false`, omit `DATABASE_URL`, and run every file in
+`db/migrations/` **in filename order** in the SQL editor
+(`npm run db:print` emits them all in one go):
 
 ```
 0001_core.sql          identity, tenancy, plans
@@ -38,6 +72,8 @@ In the SQL editor, run every file in `db/migrations/` **in filename order**:
 ```
 
 Every statement is idempotent, so re-running a file is safe.
+
+</details>
 
 ### Grant yourself admin access
 
