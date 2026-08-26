@@ -153,4 +153,34 @@ export async function compareCheckpoint(checkpointId, { projectId }) {
   return { checkpoint: { id: checkpoint.id, label: checkpoint.label, createdAt: checkpoint.created_at }, changes };
 }
 
+/**
+ * Capture a file's original contents into an existing checkpoint.
+ *
+ * Without git there is nothing to diff against, and at the moment a checkpoint
+ * is created the agent has not yet decided which files it will change. Rather
+ * than store a checkpoint that restores nothing, the first write to each file
+ * folds that file's original contents into the checkpoint.
+ */
+export async function captureOriginal(checkpointId, projectId, path) {
+  if (!checkpointId || !hasServiceRole()) return;
+
+  const client = serviceClient();
+  const checkpoint = await client.from('checkpoints').select('files,size_bytes').eq('id', checkpointId).first();
+  if (!checkpoint) return;
+
+  const files = Array.isArray(checkpoint.files) ? checkpoint.files : [];
+  if (files.some(file => file.path === path)) return;          // already captured
+  if (files.length >= MAX_CAPTURED_FILES) return;
+
+  const existing = await readWorkspaceFile(projectId, path).catch(() => null);
+  const entry = existing
+    ? { path, content: existing.content, hash: existing.hash, existed: true }
+    : { path, existed: false };
+
+  await client.from('checkpoints').eq('id', checkpointId).update({
+    files: [...files, entry],
+    size_bytes: (checkpoint.size_bytes || 0) + (entry.content?.length || 0)
+  }).catch(error => logger.debug('checkpoint capture skipped', { path, reason: error?.message }));
+}
+
 export { isGitRepository, MAX_CAPTURED_FILES };

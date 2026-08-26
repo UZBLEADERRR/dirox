@@ -17,7 +17,7 @@ import { assembleContext } from '../context/engine.js';
 import { TokenBudget, defaultBudgetFor } from '../context/budget.js';
 import { plannerPrompt } from './prompts.js';
 import { toolsFor, toolDefinitions, executeTool } from './tools/index.js';
-import { createCheckpoint } from './checkpoints.js';
+import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
 import { AppError, cancelled, quotaExceeded } from '../core/errors.js';
@@ -57,6 +57,7 @@ export async function runTask(task, options) {
     consecutiveFailures: 0,
     escalations: 0,
     checkpointed: false,
+    checkpointId: null,
     conversation: []
   };
 
@@ -64,6 +65,16 @@ export async function runTask(task, options) {
     const existing = state.changedFiles.get(path);
     // A file created then modified is still "created" from the user's view.
     state.changedFiles.set(path, existing?.kind === 'created' && kind === 'modified' ? existing : { path, kind });
+  };
+
+  /**
+   * Called before a tool writes. Folds the file's original contents into the
+   * checkpoint so it is genuinely restorable, rather than a checkpoint that
+   * promises recovery it cannot deliver.
+   */
+  const beforeFileChange = async path => {
+    if (!state.checkpointId || !project) return;
+    await captureOriginal(state.checkpointId, project.id, path).catch(() => {});
   };
 
   const step = async (phase, title, fn, detail = {}) => {
@@ -160,6 +171,7 @@ export async function runTask(task, options) {
           label: task.title, userId: auth.user.id
         });
         state.checkpointed = Boolean(checkpoint);
+        state.checkpointId = checkpoint?.id ?? null;
         return { summary: checkpoint ? 'Restore point created' : 'Restore point unavailable' };
       });
     }
@@ -368,6 +380,7 @@ export async function runTask(task, options) {
           approvedCalls,
           toolOutputLimit: limits.toolOutputChars,
           recordFileChange,
+          beforeFileChange,
           onOutput: chunk => emit('output', { tool: call.name, ...chunk })
         });
 

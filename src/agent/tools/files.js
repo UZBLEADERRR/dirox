@@ -50,6 +50,7 @@ export const fileTools = [
       content: t.string({ required: true, max: 400_000, trim: false })
     }),
     async run({ path, content }, ctx) {
+      await ctx.beforeFileChange?.(path);
       const result = await writeWorkspaceFile(ctx.projectId, path, content);
       ctx.recordFileChange(path, result.created ? 'created' : 'modified');
       return {
@@ -71,6 +72,7 @@ export const fileTools = [
       newText: t.string({ required: true, max: 100_000, trim: false, description: 'Replacement text' })
     }),
     async run({ path, oldText, newText }, ctx) {
+      await ctx.beforeFileChange?.(path);
       const file = await readWorkspaceFile(ctx.projectId, path);
 
       const occurrences = file.content.split(oldText).length - 1;
@@ -108,6 +110,7 @@ export const fileTools = [
     async run({ path, content }, ctx) {
       const existing = await readWorkspaceFile(ctx.projectId, path).catch(() => null);
       if (existing) throw conflict(`${path} already exists. Use edit_file or write_file to change it.`);
+      await ctx.beforeFileChange?.(path);
       const result = await writeWorkspaceFile(ctx.projectId, path, content);
       ctx.recordFileChange(path, 'created');
       return { output: `Created ${path}`, metadata: result };
@@ -120,6 +123,7 @@ export const fileTools = [
     description: 'Delete a file or directory. Requires approval.',
     schema: t.object({ path: t.string({ required: true, max: 400 }) }),
     async run({ path }, ctx) {
+      await ctx.beforeFileChange?.(path);
       const result = await deleteWorkspacePath(ctx.projectId, path);
       ctx.recordFileChange(path, 'deleted');
       return { output: `Deleted ${path}`, metadata: result };
@@ -135,6 +139,8 @@ export const fileTools = [
       to: t.string({ required: true, max: 400 })
     }),
     async run({ from, to }, ctx) {
+      await ctx.beforeFileChange?.(from);
+      await ctx.beforeFileChange?.(to);
       const result = await moveWorkspacePath(ctx.projectId, from, to);
       ctx.recordFileChange(from, 'deleted');
       ctx.recordFileChange(to, 'created');

@@ -11,7 +11,7 @@ import { assertWithinPlan, getPlanUsage } from '../billing/usage.js';
 import { defaultBudgetFor } from '../../context/budget.js';
 import { classify } from '../../ai/router.js';
 import { restoreCheckpoint, compareCheckpoint, createCheckpoint } from '../../agent/checkpoints.js';
-import { startTask, stopTask, subscribe, activeRun, approveAndResume, queueBackgroundRun } from './runner.js';
+import { startTask, stopTask, subscribe, activeRun, isRunning, approveAndResume, queueBackgroundRun } from './runner.js';
 import { TRUST } from '../../agent/permissions.js';
 
 const MODES = ['ask', 'edit', 'agent', 'autopilot', 'review', 'debug', 'plan'];
@@ -155,7 +155,7 @@ export function taskRoutes() {
 
     return sendJson(ctx.res, 200, {
       task: shapeTask(task),
-      running: Boolean(activeRun(task.id)),
+      running: isRunning(task.id),
       steps: steps.map(step => ({
         index: step.step_index, phase: step.phase, title: step.title, status: step.status,
         summary: step.summary, detail: step.detail, durationMs: step.duration_ms,
@@ -298,7 +298,7 @@ export function taskRoutes() {
   router.post('/:id/checkpoints/:checkpointId/restore', async ctx => {
     const task = await loadTask(ctx, ctx.params.id);
     if (!task.project_id) throw badRequest('This task has no project workspace to restore');
-    if (activeRun(task.id)) throw conflict('Stop the task before restoring a checkpoint');
+    if (isRunning(task.id)) throw conflict('Stop the task before restoring a checkpoint');
 
     const checkpointId = parse(uuid({ required: true }), ctx.params.checkpointId);
     const result = await restoreCheckpoint(checkpointId, { projectId: task.project_id });

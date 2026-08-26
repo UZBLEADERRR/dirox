@@ -22,7 +22,24 @@ const active = new Map();
 const MAX_BUFFER = 300;
 
 export function activeRun(taskId) { return active.get(taskId) ?? null; }
-export function activeCount() { return active.size; }
+
+/**
+ * Is this task still executing?
+ *
+ * A finished run stays in `active` briefly so a late subscriber still receives
+ * the end of the timeline. That is not the same as still running, and callers
+ * guarding a destructive action must ask this rather than `activeRun`.
+ */
+export function isRunning(taskId) {
+  const run = active.get(taskId);
+  return Boolean(run && !run.finished);
+}
+
+export function activeCount() {
+  let running = 0;
+  for (const run of active.values()) if (!run.finished) running += 1;
+  return running;
+}
 
 /**
  * Subscribe to a run's events. Replays what has happened so far, so a client

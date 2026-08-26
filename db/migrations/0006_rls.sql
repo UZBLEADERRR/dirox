@@ -55,9 +55,12 @@ drop policy if exists plans_read on plans;
 create policy plans_read on plans for select using (is_public or app.reads_everything());
 
 -- ─── organizations ──────────────────────────────────────────────────────────
+-- The owner is included explicitly, not only through membership: when an
+-- organization is first created its membership row does not exist yet, and
+-- without this the creator could not read back the row they just inserted.
 drop policy if exists organizations_read on organizations;
 create policy organizations_read on organizations for select
-  using (app.is_org_member(id) or app.reads_everything());
+  using (owner_id = auth.uid() or app.is_org_member(id) or app.reads_everything());
 
 drop policy if exists organizations_insert on organizations;
 create policy organizations_insert on organizations for insert
@@ -80,20 +83,35 @@ create policy org_members_manage on organization_members for all
   using (app.can_admin_org(org_id)) with check (app.can_admin_org(org_id));
 
 -- A new organization's first membership row is written by its creator.
+--
+-- The ownership check must be SECURITY DEFINER. An inline subquery against
+-- organizations would itself be filtered by that table's read policy, which
+-- depends on membership — the very row being inserted — and the two would
+-- deadlock, leaving a new user unable to create their own workspace.
+create or replace function app.owns_org(target_org uuid, uid uuid default auth.uid()) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from organizations o where o.id = target_org and o.owner_id = uid)
+$$;
+
 drop policy if exists org_members_bootstrap on organization_members;
 create policy org_members_bootstrap on organization_members for insert
-  with check (user_id = auth.uid() and exists (
-    select 1 from organizations o where o.id = org_id and o.owner_id = auth.uid()
-  ));
+  with check (user_id = auth.uid() and app.owns_org(org_id));
 
 drop policy if exists subscriptions_read on subscriptions;
 create policy subscriptions_read on subscriptions for select
   using (app.is_org_member(org_id) or app.reads_everything());
 
 -- ─── projects ───────────────────────────────────────────────────────────────
+-- Read from the row's own org_id rather than looking the project up by id:
+-- INSERT ... RETURNING applies the SELECT policy while the row is still being
+-- written, and a lookup by id finds nothing at that point.
 drop policy if exists projects_read on projects;
 create policy projects_read on projects for select
-  using (app.can_read_project(id) or app.reads_everything());
+  using (
+    org_id in (select org_id from organization_members where user_id = auth.uid())
+    or exists (select 1 from project_members pm where pm.project_id = id and pm.user_id = auth.uid())
+    or app.reads_everything()
+  );
 
 drop policy if exists projects_insert on projects;
 create policy projects_insert on projects for insert
@@ -101,7 +119,7 @@ create policy projects_insert on projects for insert
 
 drop policy if exists projects_update on projects;
 create policy projects_update on projects for update
-  using (app.can_write_project(id)) with check (app.can_write_project(id));
+  using (app.can_write_org(org_id)) with check (app.can_write_org(org_id));
 
 drop policy if exists projects_delete on projects;
 create policy projects_delete on projects for delete
