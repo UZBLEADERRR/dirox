@@ -31,17 +31,28 @@ function aside() {
   );
 }
 
-function oauthButtons(disabled) {
+function oauthButtons(disabled, next) {
   const providers = [['github', 'Continue with GitHub'], ['google', 'Continue with Google']];
+  const query = next && next !== '/app' ? `?next=${encodeURIComponent(next)}` : '';
+
   return h('div.stack--tight', { class: 'stack' },
     providers.map(([provider, label]) => h('a.btn.btn--block', {
-      href: disabled ? null : `/api/auth/oauth/${provider}`,
+      href: disabled ? null : `/api/auth/oauth/${provider}${query}`,
+      // A real browser navigation to a server endpoint, not a client route.
+      'data-native': true,
       'aria-disabled': disabled ? 'true' : null,
       style: disabled ? { opacity: '.45', pointerEvents: 'none' } : {},
       onClick: disabled ? event => event.preventDefault() : null
     }, label))
   );
 }
+
+/** Reasons the OAuth round trip can come back without a session. */
+const OAUTH_ERRORS = {
+  app_url_missing: 'Social sign-in is not finished being set up on this deployment: APP_URL is not configured, so the provider has nowhere to send you back to.',
+  auth_not_configured: 'This deployment has no authentication service configured yet.',
+  unsupported_provider: 'That sign-in provider is not supported.'
+};
 
 async function finishSignIn(session, nextPath) {
   api.setToken(session.accessToken);
@@ -187,6 +198,10 @@ function resetForm() {
 
 /** Supabase returns the session in the URL fragment after an OAuth redirect. */
 async function handleCallback(next) {
+  // The destination was carried through the provider as a query parameter.
+  const carried = new URLSearchParams(location.search).get('next');
+  if (carried?.startsWith('/')) next = carried;
+
   const params = new URLSearchParams(location.hash.slice(1));
   const accessToken = params.get('access_token');
   const errorDescription = params.get('error_description');
@@ -224,6 +239,10 @@ export async function render(renderTo, { mode = 'login', query = {} } = {}) {
 
   const form = mode === 'signup' ? signupForm({ next }) : mode === 'reset' ? resetForm() : loginForm({ next });
 
+  // A failed OAuth attempt comes back as ?error=<reason>.
+  const oauthError = query.error ? (OAUTH_ERRORS[query.error] || 'Sign-in did not complete. Please try again.') : null;
+  if (query.error) history.replaceState({}, '', location.pathname);
+
   renderTo(h('div.auth',
     aside(),
     h('main.auth__main', { id: 'main' },
@@ -232,10 +251,12 @@ export async function render(renderTo, { mode = 'login', query = {} } = {}) {
         h('h1.auth__title', copy[0]),
         h('p.auth__sub', copy[1]),
 
+        oauthError ? h('div.auth__notice', { role: 'alert' }, oauthError) : null,
+
         dbReady ? null : h('div.auth__notice', { role: 'status' },
           'This deployment has no database configured yet. Set SUPABASE_URL and SUPABASE_ANON_KEY on the server to enable accounts.'),
 
-        mode === 'reset' ? null : oauthButtons(!dbReady),
+        mode === 'reset' ? null : oauthButtons(!dbReady, next),
         mode === 'reset' ? null : h('div.auth__divider', 'or'),
         form,
 

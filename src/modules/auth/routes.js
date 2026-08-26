@@ -133,14 +133,38 @@ export function authRoutes() {
     return sendJson(ctx.res, 200, { ok: true });
   });
 
+  /**
+   * Begin a social sign-in.
+   *
+   * A full browser navigation, not an API call: the browser has to follow the
+   * redirect to the provider. Failures redirect back to /login with a reason
+   * rather than rendering JSON at someone who clicked a button.
+   */
   router.get('/oauth/:provider', async ctx => {
     const provider = String(ctx.params.provider || '').toLowerCase();
-    const redirectTo = `${config.appUrl || ''}/auth/callback`;
-    if (!redirectTo.startsWith('http')) throw badRequest('APP_URL must be configured for OAuth sign-in');
+    const fail = reason => {
+      ctx.res.statusCode = 302;
+      ctx.res.setHeader('Location', `/login?error=${encodeURIComponent(reason)}`);
+      ctx.res.end();
+    };
+
+    if (!['google', 'github'].includes(provider)) return fail('unsupported_provider');
+    if (!config.supabase.url) return fail('auth_not_configured');
+    if (!/^https?:\/\//.test(config.appUrl)) {
+      ctx.log.error('APP_URL is not set, so the provider has nowhere to send the user back to');
+      return fail('app_url_missing');
+    }
+
+    // Carry the intended destination through the provider round trip, so the
+    // user lands where they were going rather than always on the dashboard.
+    const next = String(ctx.query.next || '').slice(0, 300);
+    const callback = new URL('/auth/callback', config.appUrl);
+    if (next.startsWith('/')) callback.searchParams.set('next', next);
+
     ctx.res.statusCode = 302;
-    ctx.res.setHeader('Location', auth.oauthUrl(provider, redirectTo));
+    ctx.res.setHeader('Location', auth.oauthUrl(provider, callback.toString()));
     ctx.res.end();
-  });
+  }, { auth: false });
 
   /** Current identity, organization and role — the client's bootstrap call. */
   router.get('/me', async ctx => {

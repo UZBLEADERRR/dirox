@@ -75,10 +75,24 @@ export const router = {
     // Intercept in-app links so anchors keep working without a full reload.
     document.addEventListener('click', event => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
       const anchor = event.target.closest('a[href]');
       if (!anchor) return;
+
       const href = anchor.getAttribute('href');
-      if (!href || href.startsWith('http') || href.startsWith('//') || href.startsWith('mailto:') || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
+      if (!href) return;
+
+      // Anything the browser itself should handle.
+      if (href.startsWith('http') || href.startsWith('//') || href.startsWith('mailto:') ||
+          href.startsWith('tel:') || href.startsWith('#') ||
+          anchor.target === '_blank' || anchor.hasAttribute('download') ||
+          anchor.hasAttribute('data-native')) return;
+
+      // Server endpoints are never client routes. /api/ paths redirect, stream
+      // or download; treating one as an in-app navigation lands on "not found"
+      // and the request the link existed to make never happens.
+      if (href.startsWith('/api/')) return;
+
       event.preventDefault();
       this.navigate(href);
     });
