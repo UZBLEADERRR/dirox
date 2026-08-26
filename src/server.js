@@ -12,6 +12,8 @@ import { config, configReport } from './config/env.js';
 import { logger } from './core/logger.js';
 import { drainObservability } from './modules/observability/audit.js';
 import { startWorker, stopWorker } from './queue/worker.js';
+// Importing the job modules is what registers their handlers with the worker.
+import './modules/projects/service.js';
 
 const app = createApp();
 const server = createServer(app);

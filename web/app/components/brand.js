@@ -12,10 +12,13 @@ export function mark({ size = 26, className = 'brand__mark' } = {}) {
   svg.setAttribute('aria-hidden', 'true');
   if (className) svg.setAttribute('class', className);
 
+  // Outer disc minus an offset disc: the difference is the crescent.
   const crescent = document.createElementNS(ns, 'path');
-  crescent.setAttribute('d', 'M31 4a20 20 0 1 0 0 40 16 16 0 1 1 0-40Z');
+  crescent.setAttribute('d', 'M24 3a21 21 0 1 0 0 42 21 21 0 1 0 0-42Zm9.5 3.2a17.5 17.5 0 1 1 0 35.6 17.5 17.5 0 1 1 0-35.6Z');
+  crescent.setAttribute('fill-rule', 'evenodd');
+
   const star = document.createElementNS(ns, 'path');
-  star.setAttribute('d', 'M33 17.5 34.9 22.6 40 24.5 34.9 26.4 33 31.5 31.1 26.4 26 24.5 31.1 22.6Z');
+  star.setAttribute('d', 'M33.5 15.2 36 22 42.8 24.5 36 27 33.5 33.8 31 27 24.2 24.5 31 22Z');
 
   svg.append(crescent, star);
   return svg;

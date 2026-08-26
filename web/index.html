@@ -23,13 +23,8 @@
 <link rel="stylesheet" href="/styles/marketing.css">
 <link rel="stylesheet" href="/styles/workspace.css">
 
-<script>
-  // Apply the saved theme before first paint so the app never flashes.
-  try {
-    var saved = JSON.parse(localStorage.getItem('diroxcode.ui') || '{}');
-    if (saved.theme === 'light' || saved.theme === 'dark') document.documentElement.dataset.theme = saved.theme;
-  } catch (e) {}
-</script>
+<!-- Applies the saved theme before first paint. External so the CSP can forbid inline scripts. -->
+<script src="/app/theme.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
