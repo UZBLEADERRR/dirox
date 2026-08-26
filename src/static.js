@@ -72,12 +72,17 @@ export async function serveStatic(req, res, url, { fallback = false } = {}) {
     return true;
   }
 
-  const isShell = full.endsWith('index.html');
   res.statusCode = 200;
   res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
   res.setHeader('Content-Length', info.size);
   res.setHeader('ETag', etag);
-  res.setHeader('Cache-Control', isShell ? 'no-cache' : 'public, max-age=3600, must-revalidate');
+
+  // Every file here keeps its path across deploys — there is no content hash in
+  // any URL — so a max-age would serve yesterday's application from a phone
+  // that has not been closed. Revalidate always; the ETag above turns the
+  // common case into a 304 with no body, which costs a round trip and nothing
+  // else. A stale interface is far more expensive than that.
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
 
   if (req.method === 'HEAD') { res.end(); return true; }
 
