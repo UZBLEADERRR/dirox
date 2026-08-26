@@ -57,11 +57,13 @@
 .meta-row__value { color: var(--text); margin: 0; font-variant-numeric: tabular-nums; }
 
 /* ── conversation ───────────────────────────────────────────────────────── */
-.chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.chat { --chat-w: 740px; display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .chat__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+/* The text column and the composer box share one width, so the conversation
+   reads as a single column rather than two that nearly line up. */
 .chat__inner {
   width: 100%;
-  max-width: 760px;
+  max-width: calc(var(--chat-w) + 2 * var(--s-5));
   margin: 0 auto;
   padding: var(--s-6) var(--s-5) var(--s-8);
   display: flex;
@@ -142,8 +144,8 @@
 .file-ref:hover { border-color: var(--accent-line); color: var(--text-strong); }
 
 /* ── composer ───────────────────────────────────────────────────────────── */
-.composer { flex: none; padding: var(--s-4) var(--s-5) var(--s-5); background: var(--bg); }
-.composer__inner { max-width: 780px; margin: 0 auto; }
+.composer { --chat-w: 740px; flex: none; padding: var(--s-4) var(--s-5) var(--s-5); background: var(--bg); }
+.composer__inner { max-width: calc(var(--chat-w) + 2 * var(--s-5)); margin: 0 auto; padding: 0 var(--s-5); }
 
 .composer__box {
   border: 1px solid var(--border-strong);

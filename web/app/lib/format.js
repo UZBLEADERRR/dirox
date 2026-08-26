@@ -1,11 +1,22 @@
 /** Presentation helpers. Cost stays secondary in the UI, so it formats small. */
 
+/**
+ * Money, at the precision the amount deserves.
+ *
+ * A single cheap turn costs a few dozen micro-dollars, and four decimals
+ * rounds that to "$0.0000" — which reads as free, or as broken. Small amounts
+ * get more decimals rather than fewer, because in a product whose whole claim
+ * is cost control, the small numbers are the interesting ones.
+ */
 export function formatCost(micros, { precise = false } = {}) {
   const dollars = Number(micros || 0) / 1_000_000;
   if (dollars === 0) return '$0.00';
-  if (dollars < 0.01 && !precise) return `$${dollars.toFixed(4)}`;
-  if (dollars < 1) return `$${dollars.toFixed(precise ? 4 : 3)}`;
-  return `$${dollars.toFixed(2)}`;
+
+  const abs = Math.abs(dollars);
+  if (abs >= 1) return `$${dollars.toFixed(2)}`;
+  if (abs >= 0.01) return `$${dollars.toFixed(precise ? 4 : 3)}`;
+  if (abs >= 0.0001) return `$${dollars.toFixed(4)}`;
+  return `$${dollars.toFixed(6)}`;
 }
 
 export function formatCents(cents) {

@@ -10,7 +10,7 @@
  * panels only when the task involves code.
  */
 
-import { h, icon, mount, clear, qs } from '../lib/dom.js';
+import { h, icon, mount, qs } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { router } from '../lib/router.js';
@@ -18,10 +18,9 @@ import { renderInShell, setPanel, clearPanel, refreshConversations } from '../co
 import { registerCommands, clearCommands } from '../components/palette.js';
 import { createComposer } from '../components/composer.js';
 import { createActivity } from '../components/activity.js';
-import { renderMarkdown, renderDiff } from '../components/markdown.js';
-import { confirmModal } from '../components/modal.js';
+import { renderMarkdown } from '../components/markdown.js';
 import { toast, toastError } from '../lib/toast.js';
-import { formatCost, formatDuration, formatTokens, relativeTime } from '../lib/format.js';
+import { formatCost, formatTokens } from '../lib/format.js';
 
 let currentStream = null;
 let currentTaskId = null;
