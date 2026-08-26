@@ -11,7 +11,7 @@ import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { router } from '../lib/router.js';
 import { renderInShell } from '../components/shell.js';
-import { confirmModal } from '../components/modal.js';
+import { confirmModal, openModal } from '../components/modal.js';
 import { toast, toastError } from '../lib/toast.js';
 import { formatCost, formatCents, formatTokens, formatNumber, relativeTime, formatDate, initials } from '../lib/format.js';
 
@@ -262,8 +262,86 @@ async function usagePanel() {
   return container;
 }
 
+/** Choose a plan and hand off to hosted checkout. */
+async function openPlanPicker(currentCode) {
+  const body = h('div', h('div.skeleton', { style: { height: '160px' } }));
+  const modal = openModal({ title: 'Change plan', wide: true, body });
+
+  try {
+    const { plans } = await api.get('/billing/plans');
+    let interval = 'monthly';
+
+    const intervalPicker = h('div.mode-picker', { style: { alignSelf: 'flex-start' } },
+      [['monthly', 'Monthly'], ['yearly', 'Yearly']].map(([value, label]) =>
+        h('button.mode-picker__btn', {
+          'aria-pressed': String(value === interval),
+          onClick: () => {
+            interval = value;
+            for (const button of intervalPicker.children) {
+              button.setAttribute('aria-pressed', String(button.textContent === label));
+            }
+            renderPlans();
+          }
+        }, label)));
+
+    const list = h('div.grid.grid--2');
+
+    function renderPlans() {
+      mount(list, plans.map(item => {
+        const price = interval === 'yearly' ? item.priceYearlyCents : item.priceMonthlyCents;
+        const isCurrent = item.code === currentCode;
+        const selfServe = price > 0;
+
+        return h('div.card', { style: isCurrent ? { borderColor: 'var(--accent-line)' } : {} },
+          h('div.row.row--between',
+            h('div', { style: { fontWeight: '600', color: 'var(--text-strong)' } }, item.name),
+            isCurrent ? h('span.badge.badge--accent', 'current') : null),
+          h('div', { style: { fontSize: 'var(--fs-2xl)', fontWeight: '600', margin: 'var(--s-3) 0' } },
+            price ? formatCents(price) : 'Custom',
+            price ? h('span.subtle', { style: { fontSize: 'var(--fs-xs)', fontWeight: '400' } },
+              interval === 'yearly' ? ' / year' : ' / month') : null),
+          h('p.subtle', { style: { fontSize: 'var(--fs-xs)', minHeight: '2.6em' } }, item.description),
+          isCurrent
+            ? h('button.btn.btn--block', { disabled: true }, 'Current plan')
+            : selfServe
+              ? h('button.btn.btn--primary.btn--block', {
+                  onClick: async event => {
+                    event.currentTarget.disabled = true;
+                    try {
+                      const { url } = await api.post('/billing/checkout', { planCode: item.code, interval });
+                      location.href = url;
+                    } catch (error) {
+                      toastError(error, 'Checkout could not be started');
+                      event.currentTarget.disabled = false;
+                    }
+                  }
+                }, `Switch to ${item.name}`)
+              : h('a.btn.btn--block', { href: '/contact' }, 'Contact us')
+        );
+      }));
+    }
+
+    mount(body, h('div.stack', intervalPicker, list));
+    renderPlans();
+  } catch (error) {
+    mount(body, h('div.empty', h('p.empty__body', error.message)));
+  }
+}
+
 async function billingPanel() {
   const container = h('div', h('div.skeleton', { style: { height: '180px' } }));
+
+  // Hosted checkout returns here with a status. Report it honestly: the
+  // subscription is only real once the webhook has been processed.
+  const params = new URLSearchParams(location.search);
+  if (params.get('checkout') === 'success') {
+    toast.success('Payment received. Your plan updates as soon as the confirmation arrives.');
+    history.replaceState({}, '', '/app/settings/billing');
+  } else if (params.get('checkout') === 'cancelled') {
+    toast('Checkout cancelled. Nothing was charged.');
+    history.replaceState({}, '', '/app/settings/billing');
+  }
+
   try {
     const data = await api.get('/billing/subscription');
     const { plan, subscription, usage, limits } = data;
@@ -300,9 +378,22 @@ async function billingPanel() {
               : null
           ),
           data.paymentsEnabled
-            ? h('button.btn.btn--primary', {
-                onClick: () => toast('Plan changes are handled by your billing provider. Contact support to switch plans.')
-              }, 'Change plan')
+            ? h('div.row',
+                subscription?.status === 'active' || subscription?.status === 'past_due'
+                  ? h('button.btn', {
+                      onClick: async event => {
+                        event.currentTarget.disabled = true;
+                        try {
+                          const { url } = await api.post('/billing/portal', {});
+                          location.href = url;
+                        } catch (error) {
+                          toastError(error, 'Billing portal unavailable');
+                          event.currentTarget.disabled = false;
+                        }
+                      }
+                    }, 'Manage billing')
+                  : null,
+                h('button.btn.btn--primary', { onClick: () => openPlanPicker(plan.code) }, 'Change plan'))
             : h('span.badge', 'Payments not configured')
         ),
 
