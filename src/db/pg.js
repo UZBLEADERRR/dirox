@@ -91,31 +91,126 @@ export class PostgresError extends AppError {
 
 /**
  * Parse a Postgres connection URI.
- * Accepts postgres:// and postgresql://, with query parameters.
+ *
+ * Deliberately hand-parsed rather than handed to `new URL`, because a database
+ * password is a hostile input for a URL parser and these strings are pasted by
+ * hand. A `#` makes `new URL` throw; a `?` swallows the rest as a query; a `%`
+ * that is not a valid escape makes decodeURIComponent throw "URI malformed",
+ * which says nothing useful to whoever pasted it.
+ *
+ * The rules that matter: the password runs to the LAST `@` in the authority,
+ * and every component is decoded only when decoding actually succeeds.
  */
 export function parseConnectionString(uri) {
-  let url;
-  try { url = new URL(uri); }
-  catch { throw new AppError('DATABASE_URL is not a valid connection string', { status: 500, code: 'bad_config' }); }
+  const raw = String(uri ?? '').trim();
 
-  if (!/^postgres(ql)?:$/.test(url.protocol)) {
-    throw new AppError('DATABASE_URL must start with postgres:// or postgresql://', { status: 500, code: 'bad_config' });
+  if (!raw) {
+    throw new AppError('DATABASE_URL is empty', { status: 500, code: 'bad_config' });
   }
 
-  const sslmode = url.searchParams.get('sslmode') || 'require';
+  const schemeMatch = /^(postgres(?:ql)?):\/\/(.*)$/is.exec(raw);
+  if (!schemeMatch) {
+    throw new AppError(
+      'DATABASE_URL must start with postgresql:// or postgres://',
+      { status: 500, code: 'bad_config' }
+    );
+  }
+
+  let rest = schemeMatch[2];
+
+  // Credentials end at the LAST '@', which is located before anything else is
+  // split off. Doing it in this order means '@', '/', '#' and '?' inside a
+  // password are all handled, since none of them can appear in a hostname.
+  const at = rest.lastIndexOf('@');
+  const credentials = at === -1 ? '' : rest.slice(0, at);
+  const afterCredentials = at === -1 ? rest : rest.slice(at + 1);
+
+  // The path begins at the first '/' after the host.
+  const pathStart = afterCredentials.indexOf('/');
+  const hostPart = pathStart === -1 ? afterCredentials : afterCredentials.slice(0, pathStart);
+  const pathAndQuery = pathStart === -1 ? '' : afterCredentials.slice(pathStart + 1);
+
+  const colon = credentials.indexOf(':');
+  const rawUser = colon === -1 ? credentials : credentials.slice(0, colon);
+  const rawPassword = colon === -1 ? '' : credentials.slice(colon + 1);
+
+  // A query string is only meaningful after the database name.
+  let database = pathAndQuery;
+  let query = '';
+  const questionMark = pathAndQuery.indexOf('?');
+  if (questionMark !== -1) {
+    database = pathAndQuery.slice(0, questionMark);
+    query = pathAndQuery.slice(questionMark + 1);
+  }
+
+  // Host may be bracketed for IPv6: [::1]:5432
+  let host = hostPart;
+  let port = 5432;
+  const ipv6 = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostPart);
+  if (ipv6) {
+    host = ipv6[1];
+    if (ipv6[2]) port = Number(ipv6[2]);
+  } else {
+    const hostColon = hostPart.lastIndexOf(':');
+    if (hostColon !== -1) {
+      const maybePort = hostPart.slice(hostColon + 1);
+      if (/^\d+$/.test(maybePort)) {
+        host = hostPart.slice(0, hostColon);
+        port = Number(maybePort);
+      }
+    }
+  }
+
+  if (!host) {
+    throw new AppError('DATABASE_URL has no host. Expected postgresql://user:password@host:5432/database', {
+      status: 500, code: 'bad_config'
+    });
+  }
+
+  const params = new URLSearchParams(query);
+  const sslmode = params.get('sslmode') || 'require';
+  const user = safeDecode(rawUser, 'username') || 'postgres';
+  const password = safeDecode(rawPassword, 'password');
+
+  // The commonest paste mistake by a wide margin.
+  if (/^\[.*\]$/.test(password) || /YOUR[-_]?PASSWORD/i.test(password)) {
+    throw new AppError(
+      'DATABASE_URL still contains the password placeholder. Replace [YOUR-PASSWORD] with the real database password.',
+      { status: 500, code: 'bad_config' }
+    );
+  }
+
   return {
-    host: decodeURIComponent(url.hostname),
-    port: Number(url.port) || 5432,
-    user: decodeURIComponent(url.username || 'postgres'),
-    password: decodeURIComponent(url.password || ''),
-    database: decodeURIComponent(url.pathname.slice(1) || 'postgres'),
+    host,
+    port,
+    user,
+    password,
+    database: safeDecode(database, 'database') || 'postgres',
     ssl: sslmode !== 'disable',
-    // Supabase and most managed providers present certificates that do not
-    // validate against the public roots for the pooler hostname. The channel is
-    // still encrypted; this only relaxes hostname/chain verification.
+    // Managed providers present certificates that do not chain to the public
+    // roots for the pooler hostname. The channel is still encrypted; this only
+    // relaxes hostname and chain verification.
     rejectUnauthorized: sslmode === 'verify-full' || sslmode === 'verify-ca',
-    applicationName: url.searchParams.get('application_name') || 'diroxcode-migrator'
+    applicationName: params.get('application_name') || 'diroxcode-migrator'
   };
+}
+
+/**
+ * Percent-decode a component, but only when it is genuinely percent-encoded.
+ *
+ * A password containing a literal `%` is legal and common; treating it as a
+ * broken escape and throwing would reject a perfectly good credential.
+ */
+function safeDecode(value, what) {
+  const text = String(value ?? '');
+  if (!text.includes('%')) return text;
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    // Not valid percent-encoding, so it was a literal '%' all along.
+    logger.debug('connection string component used literally', { component: what });
+    return text;
+  }
 }
 
 // ─── SCRAM-SHA-256 ──────────────────────────────────────────────────────────

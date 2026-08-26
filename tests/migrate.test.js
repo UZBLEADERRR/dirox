@@ -38,7 +38,50 @@ test('both postgres:// and postgresql:// are accepted', () => {
 
 test('a non-Postgres or malformed string is rejected', () => {
   assert.throws(() => parseConnectionString('mysql://u:p@h/d'), /must start with postgres/);
-  assert.throws(() => parseConnectionString('not a url'), /not a valid connection string/);
+  assert.throws(() => parseConnectionString('not a url'), /must start with postgres/);
+  assert.throws(() => parseConnectionString(''), /empty/);
+});
+
+/**
+ * A database password is a hostile input for a URL parser, and these strings
+ * are pasted by hand. Every one of these broke an earlier version.
+ */
+test('passwords containing URL-significant characters parse correctly', () => {
+  const cases = [
+    ['pa%ss', '% is a literal, not a broken escape'],
+    ['p@ss', 'the password runs to the LAST @'],
+    ['pass#1', '# would make new URL throw'],
+    ['pass?x', '? would be read as a query string'],
+    ['pa/ss', '/ would be read as the start of the path'],
+    ['p@s/s#x', 'all of them at once']
+  ];
+
+  for (const [password, why] of cases) {
+    const c = parseConnectionString(`postgresql://postgres.ref:${password}@db.example.com:5432/postgres`);
+    assert.equal(c.password, password, why);
+    assert.equal(c.host, 'db.example.com', `host must survive: ${why}`);
+    assert.equal(c.port, 5432);
+    assert.equal(c.database, 'postgres');
+  }
+});
+
+test('a genuinely percent-encoded password is still decoded', () => {
+  assert.equal(parseConnectionString('postgresql://u:p%40ss@h:5432/d').password, 'p@ss');
+  assert.equal(parseConnectionString('postgresql://u%2Ename:p@h:5432/d').user, 'u.name');
+});
+
+test('the unreplaced password placeholder is reported, not attempted', () => {
+  assert.throws(
+    () => parseConnectionString('postgresql://postgres.ref:[YOUR-PASSWORD]@db.example.com:5432/postgres'),
+    /placeholder/i
+  );
+});
+
+test('an IPv6 host and a missing port are handled', () => {
+  const v6 = parseConnectionString('postgresql://u:p@[::1]:5432/d');
+  assert.equal(v6.host, '::1');
+  assert.equal(v6.port, 5432);
+  assert.equal(parseConnectionString('postgresql://u:p@host.com/d').port, 5432, 'port defaults to 5432');
 });
 
 test('the transaction pooler is refused with an actionable message', () => {
