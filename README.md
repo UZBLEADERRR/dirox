@@ -134,9 +134,50 @@ Full model: [`docs/SECURITY.md`](docs/SECURITY.md).
 ```bash
 npm start          # serve API + client on :3000
 npm run dev        # same, with --watch
-npm test           # node:test suites
-npm run check      # syntax check every source file
+npm test           # 79 unit and integration tests
+npm run check      # parse every source file
+npm run db:print   # emit all migrations in order
 ```
 
 There is no build step and no runtime dependency tree. Node 20+ is the only
 requirement.
+
+### Verifying against a real database
+
+Unit tests do not catch schema bugs. Two scripts exercise the real thing:
+
+```bash
+export PGARGS="-h localhost -U postgres"
+npm run test:db
+```
+
+`scripts/verify-migrations.sh` applies every migration to a clean database and
+then *asserts the result*: all 45 tables exist, row level security is enabled
+on every one of them, all predicate functions exist, seed data is present,
+exactly one plan is default, every routing rule resolves to an enabled model,
+and no model is its own fallback. It then re-applies everything to prove
+idempotency.
+
+`scripts/verify-rls.sql` is the tenant isolation proof. It creates two users in
+two organizations and asserts, as each of them under a role where RLS actually
+applies, that neither can read or write the other's projects, tasks, files,
+memory or profile — and that each can still reach their own.
+
+This is how the four bugs in `d67f427` were found, three of which would have
+made the product unusable on first sign-in.
+
+## What is verified
+
+| Claim | How |
+| --- | --- |
+| Tenant isolation | Two users, two orgs, real RLS — `scripts/verify-rls.sql` |
+| Schema correctness | 45 tables, RLS everywhere, idempotent — `verify-migrations.sh` |
+| Command injection is impossible | `tests/policy.test.js`, `tests/sandbox.test.js` |
+| Secrets never reach a subprocess | `tests/sandbox.test.js` |
+| Workspace escape is impossible | `tests/workspace.test.js`, including symlinks |
+| Trust levels never cover destructive actions | `tests/permissions.test.js` |
+| Repository content cannot instruct the agent | `tests/injection.test.js` |
+| Every route declares authorization | `tests/routes.test.js` |
+| Cost arithmetic is exact | `tests/pricing.test.js` |
+| Webhooks cannot be forged or replayed | `tests/webhook.test.js` |
+| The agent loop works end to end | Verified against real Postgres, PostgREST and a scripted model |
