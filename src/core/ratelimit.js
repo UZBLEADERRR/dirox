@@ -49,7 +49,11 @@ export const limiter = new RateLimiter();
 
 /** Named policies, all overridable per plan by the usage limiter. */
 export const POLICIES = {
+  // Credential-guessing surface: deliberately tight.
   auth: { limit: 10, windowMs: 60_000, message: 'Too many authentication attempts. Try again in a minute.' },
+  // Refresh requires an existing HttpOnly cookie, so it is not a guessing
+  // surface. Several browser tabs legitimately refresh at once.
+  refresh: { limit: 60, windowMs: 60_000, message: 'Too many session refreshes. Try again shortly.' },
   api: { limit: 240, windowMs: 60_000, message: 'Request rate limit reached.' },
   agent: { limit: 20, windowMs: 60_000, message: 'Too many agent runs started. Wait a moment before starting another.' },
   heavy: { limit: 6, windowMs: 60_000, message: 'This operation is rate limited. Try again shortly.' },

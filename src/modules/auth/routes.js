@@ -92,7 +92,7 @@ export function authRoutes() {
   });
 
   router.post('/refresh', async ctx => {
-    enforce('auth', ctx.ip);
+    enforce('refresh', ctx.ip);
     const body = await ctx.json().catch(() => ({}));
     const token = body.refreshToken || readCookie(ctx.req, REFRESH_COOKIE);
     if (!token) throw unauthorized('No refresh token was supplied');
