@@ -280,6 +280,12 @@
 }
 
 @media (max-width: 900px) {
+  /* Touch targets: a link that is only its line-height tall is hard to hit. */
+  .footer-col a { padding: var(--s-3) 0; min-height: 44px; display: flex; align-items: center; }
+  .site-footer__inner { gap: var(--s-6); }
+  .brand { padding: var(--s-2) 0; min-height: 44px; }
+  .site-nav__link { padding: var(--s-2) 0; min-height: 44px; display: inline-flex; align-items: center; }
+
   .site-header__inner { padding: 0 var(--s-4); gap: var(--s-4); }
   .site-nav { gap: var(--s-3); }
   .site-nav__link[data-secondary="true"] { display: none; }
@@ -290,6 +296,9 @@
   .section-block { padding: var(--s-12) var(--s-4); }
   .auth { grid-template-columns: 1fr; }
   .auth__aside { display: none; }
+  /* The "forgot password" and "create an account" links need a real hit area. */
+  .auth__form a { padding: var(--s-2) 0; min-height: 40px; display: inline-flex; align-items: center; }
+  .auth__foot { padding-top: var(--s-2); }
   .site-footer { padding: var(--s-10) var(--s-4) var(--s-8); }
   .site-footer__inner { grid-template-columns: 1fr 1fr; }
 }

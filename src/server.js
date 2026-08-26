@@ -16,6 +16,7 @@ import { startWorker, stopWorker } from './queue/worker.js';
 // Importing the job modules is what registers their handlers with the worker.
 import './modules/projects/service.js';
 import './modules/agent/runner.js';
+import { startMaintenance } from './queue/maintenance.js';
 
 const app = createApp();
 const server = createServer(app);
@@ -35,7 +36,10 @@ server.listen(config.port, () => {
 });
 
 const workerEnabled = process.env.WORKER_ENABLED !== 'false';
-if (workerEnabled) startWorker();
+if (workerEnabled) {
+  startWorker();
+  startMaintenance();
+}
 
 let shuttingDown = false;
 async function shutdown(signal) {
