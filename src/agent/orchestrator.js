@@ -366,6 +366,7 @@ export async function runTask(task, options) {
       hasRepository: Boolean(project),
       hasDevCommand: Boolean(project?.dev_command),
       hasGitHub: options.hasGitHub !== false,
+      hasSupabase: options.hasSupabase === true,
       includeGitHub: intent.profile.github === true
     });
 

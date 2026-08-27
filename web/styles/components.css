@@ -74,6 +74,9 @@
       from a variable so one rule serves both pointer types.
 */
 .field { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+/* Stacked fields need air between them, or a hint reads as the next label. */
+.field + .field { margin-top: var(--s-5); }
+.field + .row, .field + .btn { margin-top: var(--s-5); }
 .field--row { flex-direction: row; align-items: center; gap: var(--s-3); }
 
 .label {

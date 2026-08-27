@@ -15,6 +15,7 @@ import { registerHandler } from '../../queue/worker.js';
 import { enqueue, QUEUES } from '../../queue/queue.js';
 import { allFeatureFlags } from '../../ai/catalog.js';
 import { getIntegration } from '../projects/github.js';
+import { getConnection as supabaseConnection } from '../projects/supabase.js';
 import { materialiseWorkspace, snapshotWorkspace } from '../../exec/persistence.js';
 import { config } from '../../config/env.js';
 import { invalidatePlanUsage } from '../billing/usage.js';
@@ -91,9 +92,10 @@ export async function startTask(task, { project, auth, trust, allowedTiers, pref
   // A tool that can only ever return "connect your account first" is worse
   // than no tool: it costs schema tokens on every call and invites the model
   // to try. So the GitHub tools are offered only to a user who has connected.
-  const [featureFlags, hasGitHub] = await Promise.all([
+  const [featureFlags, hasGitHub, hasSupabase] = await Promise.all([
     allFeatureFlags(auth.org.id).catch(() => ({})),
     githubConnected(auth.user.id),
+    supabaseConnection(auth.user.id).then(Boolean).catch(() => false),
     // The container may be newer than the project. Rebuild the workspace from
     // durable storage before the first tool call rather than letting the agent
     // discover an empty directory and conclude the project is empty.
@@ -102,7 +104,7 @@ export async function startTask(task, { project, auth, trust, allowedTiers, pref
 
   const promise = runTask(task, {
     project, auth, emit, signal: controller.signal, approvedCalls,
-    trust, allowedTiers, preferredModelId, autoTest, featureFlags, hasGitHub
+    trust, allowedTiers, preferredModelId, autoTest, featureFlags, hasGitHub, hasSupabase
   })
     .then(async result => {
       run.finished = true;

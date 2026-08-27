@@ -152,6 +152,101 @@ function accountPanel(save) {
   );
 }
 
+/**
+ * Connecting a Supabase project.
+ *
+ * Credentials are pasted, so the panel says plainly what each one unlocks and
+ * shows only what is connected afterwards — never the key back.
+ */
+function supabasePanel() {
+  const container = h('div.card', h('div.skeleton', { style: { height: '120px' } }));
+
+  const render = state => {
+    if (state?.connected) {
+      return mount(container,
+        h('div.row.row--between', { style: { marginBottom: 'var(--s-4)' } },
+          h('div',
+            h('div', { style: { fontWeight: '600', color: 'var(--text-strong)' } }, `Supabase · ${state.ref}`),
+            h('div.subtle', { style: { fontSize: 'var(--fs-xs)' } }, state.projectUrl)),
+          h('span.badge.badge--success', 'connected')),
+
+        h('div.stack--tight', { class: 'stack', style: { marginBottom: 'var(--s-4)' } },
+          h('div.subtle', { style: { fontSize: 'var(--fs-sm)' } },
+            state.canRunSql
+              ? `SQL and migrations${state.database ? ` against "${state.database}"` : ''}.`
+              : 'No database connection string — DiroxCode can read data but cannot run migrations.'),
+          h('div.subtle', { style: { fontSize: 'var(--fs-sm)' } },
+            state.canUseRest ? 'REST API available.' : 'No service key.')),
+
+        h('button.btn.btn--danger.btn--sm', {
+          onClick: async () => {
+            if (!await confirmModal({
+              title: 'Disconnect Supabase?',
+              body: 'DiroxCode will no longer be able to read or change that database. The project itself is untouched.',
+              confirmLabel: 'Disconnect'
+            })) return;
+            await api.delete('/integrations/supabase');
+            load();
+          }
+        }, 'Disconnect'));
+    }
+
+    const fields = {
+      projectUrl: h('input.input', { placeholder: 'https://abcdefgh.supabase.co', autocomplete: 'off' }),
+      serviceKey: h('input.input.input--mono', { type: 'password', placeholder: 'service_role key', autocomplete: 'off' }),
+      connectionString: h('input.input.input--mono', { type: 'password', placeholder: 'postgresql://postgres:…@…:5432/postgres', autocomplete: 'off' })
+    };
+
+    const connect = h('button.btn.btn--primary', {
+      onClick: async () => {
+        connect.disabled = true;
+        try {
+          await api.post('/integrations/supabase', {
+            projectUrl: fields.projectUrl.value.trim(),
+            serviceKey: fields.serviceKey.value.trim(),
+            connectionString: fields.connectionString.value.trim()
+          });
+          toast.success('Supabase connected.');
+          load();
+        } catch (error) {
+          toastError(error, 'That connection could not be made');
+          connect.disabled = false;
+        }
+      }
+    }, 'Connect');
+
+    mount(container,
+      h('p.muted', { style: { fontSize: 'var(--fs-sm)', marginTop: '0' } },
+        'Connect your own Supabase project and DiroxCode can read its schema, query it, and apply migrations — ' +
+        'so an application it builds has a database, without you pasting SQL into a dashboard between every change.'),
+
+      h('div.field', h('label.label', 'Project URL'), fields.projectUrl,
+        h('p.field__hint', 'Settings → API in your Supabase dashboard.')),
+
+      h('div.field', h('label.label', 'Service role key ',
+        h('span.label__optional', '— optional')), fields.serviceKey,
+        h('p.field__hint', 'Lets DiroxCode read and write rows. Stored encrypted and never shown again.')),
+
+      h('div.field', h('label.label', 'Database connection string ',
+        h('span.label__optional', '— optional')), fields.connectionString,
+        h('p.field__hint', 'Settings → Database → Connection string. Required for migrations and schema changes.')),
+
+      h('div.row', { style: { marginTop: 'var(--s-4)' } }, connect));
+  };
+
+  async function load() {
+    try {
+      const { supabase } = await api.get('/integrations/supabase');
+      render(supabase);
+    } catch (error) {
+      mount(container, h('p.field__error', error.message));
+    }
+  }
+
+  load();
+  return container;
+}
+
 function developerPanel(save) {
   const profile = store.state.session?.profile || {};
   const languages = ['TypeScript', 'JavaScript', 'Python', 'Go', 'Rust', 'Java', 'Kotlin', 'Swift', 'C#', 'PHP', 'Ruby', 'C++'];
@@ -180,7 +275,12 @@ function developerPanel(save) {
       }));
   };
 
-  return h('div.card',
+  return h('div',
+    h('h2.section__title', { style: { marginBottom: 'var(--s-3)' } }, 'Supabase'),
+    supabasePanel(),
+
+    h('h2.section__title', { style: { margin: 'var(--s-8) 0 var(--s-3)' } }, 'Preferences'),
+    h('div.card',
     row('Experience level', 'DiroxCode adjusts how much it explains.',
       h('select.select', { onChange: e => save({ experienceLevel: e.target.value }) },
         [['beginner', 'Beginner'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced'], ['expert', 'Expert']].map(([value, label]) =>
@@ -191,6 +291,7 @@ function developerPanel(save) {
 
     row('Preferred frameworks', 'Considered when new code is scaffolded.',
       chips(frameworks, profile.preferredFrameworks, value => save({ preferredFrameworks: value })))
+    )
   );
 }
 
