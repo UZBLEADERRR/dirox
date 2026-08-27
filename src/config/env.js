@@ -45,6 +45,19 @@ export const config = {
 
   encryptionKey: env.DIROX_ENCRYPTION_KEY || '',
 
+  /**
+   * Accounts that hold platform administration.
+   *
+   * A list of email addresses rather than a seeded row, because the owner of a
+   * fresh deployment has no way to insert one: the admin panel is the only
+   * place to grant access and it is the thing being locked. Promotion happens
+   * when the address signs in, and only for an address the identity provider
+   * has confirmed — an unverified one would let anyone claim it by typing it.
+   */
+  platformAdminEmails: list(env.PLATFORM_ADMIN_EMAILS || 'sarvarbeksanjarivich@gmail.com')
+    .map(entry => entry.trim().toLowerCase())
+    .filter(Boolean),
+
   github: {
     clientId: env.GITHUB_CLIENT_ID || '',
     clientSecret: env.GITHUB_CLIENT_SECRET || '',

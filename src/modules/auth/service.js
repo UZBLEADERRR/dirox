@@ -150,7 +150,7 @@ export async function resolveAuth(req) {
     throw unauthorized('This session was signed out from another device');
   }
 
-  const isAdmin = await isPlatformAdmin(user.id, accessToken);
+  const isAdmin = await isPlatformAdmin(user.id, accessToken, user);
 
   return {
     user: { id: user.id, email: user.email, emailVerified: Boolean(user.email_confirmed_at) },
@@ -166,11 +166,65 @@ export async function resolveAuth(req) {
   };
 }
 
-export async function isPlatformAdmin(userId, accessToken) {
+export async function isPlatformAdmin(userId, accessToken, user = null) {
   return identityCache.wrap(`admin:${userId}`, async () => {
     const row = await userClient(accessToken).from('platform_admins').select('user_id,role').eq('user_id', userId).first();
-    return Boolean(row);
+    if (row) return true;
+    return promoteConfiguredOwner(userId, user);
   }, 30_000);
+}
+
+/**
+ * Does this account match a configured owner address?
+ *
+ * Pure, and exported, because it is the whole security boundary: an address on
+ * the list is not enough, the provider must also have confirmed it.
+ *
+ * @param {{email?:string, email_confirmed_at?:string|null}} user
+ * @returns {{ok:boolean, reason?:string}}
+ */
+export function configuredOwner(user, emails = config.platformAdminEmails) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  if (!email) return { ok: false, reason: 'no address' };
+  if (!emails.includes(email)) return { ok: false, reason: 'not configured' };
+  if (!user?.email_confirmed_at) return { ok: false, reason: 'unconfirmed' };
+  return { ok: true };
+}
+
+/**
+ * Grant administration to a configured owner address, once.
+ *
+ * The first administrator of a deployment cannot be created from inside the
+ * product — the admin panel is the only place to grant access, and it is the
+ * thing being locked — so the deployment's own configuration names them.
+ *
+ * Two conditions, both required. The address must be on the configured list,
+ * and the identity provider must have confirmed it: without that check anyone
+ * who typed the owner's address into a signup form would inherit the platform.
+ * It runs at sign-in rather than at boot so an account created later is still
+ * promoted, and it writes at most once because the row it inserts is what the
+ * lookup above finds next time.
+ */
+async function promoteConfiguredOwner(userId, user) {
+  const verdict = configuredOwner(user);
+  if (!verdict.ok) {
+    if (verdict.reason === 'unconfirmed') {
+      logger.warn('configured administrator address is not confirmed; not granting', { userId });
+    }
+    return false;
+  }
+  if (!hasServiceRole()) return false;
+
+  try {
+    await serviceClient().insert('platform_admins',
+      { user_id: userId, role: 'superadmin' },
+      { upsert: true, onConflict: 'user_id', returning: false });
+    logger.info('granted platform administration to a configured owner address', { userId });
+    return true;
+  } catch (error) {
+    logger.warn('could not grant platform administration', { userId, reason: error?.message });
+    return false;
+  }
 }
 
 // ─── credential flows ───────────────────────────────────────────────────────
