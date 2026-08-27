@@ -152,8 +152,86 @@ function filePanelTabs(projectId) {
   return [
     { id: 'file', label: 'File', onSelect: () => {} },
     { id: 'changes', label: 'Changes', onSelect: () => openChangesPanel(projectId) },
-    { id: 'files', label: 'Files', onSelect: () => openTreePanel(projectId) }
+    { id: 'files', label: 'Files', onSelect: () => openTreePanel(projectId) },
+    { id: 'preview', label: 'Preview', onSelect: () => openPreviewPanel(projectId) }
   ];
+}
+
+/**
+ * The app, running.
+ *
+ * The dev server has always run inside the container on loopback, where the
+ * agent could reach it and nobody else could — so "build me a landing page"
+ * ended with a description of a landing page. The server proxies it now, and
+ * this is the window.
+ *
+ * The frame is sandboxed without `allow-same-origin`: it is the user's own
+ * code on our origin, and it must not be able to read anything of ours.
+ */
+async function openPreviewPanel(projectId) {
+  const body = h('div.preview');
+  setPanel({ tabs: filePanelTabs(projectId), active: 'preview', body });
+
+  const render = state => {
+    if (state?.status === 'ready') {
+      const frame = h('iframe.preview__frame', {
+        src: `/api/projects/${projectId}/preview/`,
+        title: 'Application preview',
+        sandbox: 'allow-scripts allow-forms allow-popups allow-modals',
+        loading: 'lazy'
+      });
+
+      return mount(body,
+        h('div.preview__bar',
+          h('span.preview__dot'),
+          h('span.preview__label', 'Running'),
+          h('div', { style: { flex: '1' } }),
+          h('button.btn.btn--ghost.btn--sm', {
+            title: 'Reload the preview',
+            onClick: () => { frame.src = frame.src; }
+          }, icon('refresh', { size: 13 })),
+          h('button.btn.btn--ghost.btn--sm', {
+            onClick: async () => {
+              await api.post(`/projects/${projectId}/preview/stop`, {}).catch(() => {});
+              load();
+            }
+          }, 'Stop')),
+        frame);
+    }
+
+    const start = h('button.btn.btn--primary', {
+      onClick: async () => {
+        start.disabled = true;
+        mount(body, h('div.empty', { style: { padding: 'var(--s-8)' } },
+          h('p.empty__body', 'Starting the dev server…')));
+        try {
+          await api.post(`/projects/${projectId}/preview/start`, {});
+          load();
+        } catch (error) {
+          toastError(error, 'The preview could not start');
+          load();
+        }
+      }
+    }, 'Start the preview');
+
+    mount(body, h('div.empty', { style: { padding: 'var(--s-8)' } },
+      h('div.empty__title', 'Nothing is running'),
+      h('p.empty__body', state?.devCommand
+        ? `This project starts with \`${state.devCommand}\`. Start it to see the app here.`
+        : 'This project has no dev command yet. Ask DiroxCode to work out how it starts, or set one in project settings.'),
+      state?.devCommand ? start : null));
+  };
+
+  async function load() {
+    try {
+      const { preview } = await api.get(`/projects/${projectId}/preview/status`);
+      render(preview);
+    } catch (error) {
+      mount(body, h('div.empty', h('p.empty__body', error.message)));
+    }
+  }
+
+  await load();
 }
 
 async function openChangesPanel(projectId, changedFiles = []) {
@@ -228,6 +306,23 @@ export async function render({ params, query = {} }) {
 
   // Without a repository there is no file to open, so a citation is inert.
   const onFileClick = (path, line) => { if (projectId) openFilePanel(projectId, path, line); };
+
+  /*
+     Seed the work panel, closed.
+
+     Its tabs used to appear only once the agent cited a file, which meant
+     Preview was undiscoverable until something else happened to open the
+     panel first. The tabs exist from the moment a project chat does.
+  */
+  if (projectId) {
+    setPanel({
+      tabs: filePanelTabs(projectId),
+      active: 'files',
+      body: h('div.empty', { style: { padding: 'var(--s-8)' } },
+        h('p.empty__body', 'Files, changes and a live preview of the app appear here.')),
+      open: false
+    });
+  }
 
   // ── conversation ──
   let conversation = null;
@@ -304,7 +399,8 @@ export async function render({ params, query = {} }) {
     ...(projectId ? [
       { id: 'files', group: 'Chat', label: 'Show project files', icon: 'file', run: () => openTreePanel(projectId) },
       { id: 'changes', group: 'Chat', label: 'Show changed files', icon: 'layers', run: () => openChangesPanel(projectId, lastChangedFiles) },
-      { id: 'project', group: 'Chat', label: 'Open project overview', icon: 'projects', run: () => router.navigate(`/app/projects/${projectId}`) }
+      { id: 'project', group: 'Chat', label: 'Open project overview', icon: 'projects', run: () => router.navigate(`/app/projects/${projectId}`) },
+      { id: 'preview', group: 'Chat', label: 'Preview the app', icon: 'play', run: () => openPreviewPanel(projectId) }
     ] : []),
     { id: 'stop', group: 'Chat', label: 'Stop the agent', icon: 'stop', hint: 'Esc', run: () => stopCurrent() }
   ]);

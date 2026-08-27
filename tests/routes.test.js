@@ -97,7 +97,35 @@ test('the router matches parameters and rejects unknown paths', () => {
   assert.equal(router.match('DELETE', '/api/health')?.methodMismatch, true);
 });
 
-test('no route pattern can be shadowed by an earlier catch-all', () => {
+test('a wildcard never wins over a more specific route', () => {
+  // Routing used to take the first pattern that matched, which made
+  // correctness depend on import order. It resolves by specificity now, so a
+  // proxy route can hold a `*` without eating its own siblings.
   const wildcards = router.routes.filter(route => route.pattern.includes('*'));
-  assert.deepEqual(wildcards.map(key), [], 'wildcard routes would shadow later registrations');
+
+  for (const wildcard of wildcards) {
+    const prefix = wildcard.pattern.slice(0, wildcard.pattern.indexOf('*'));
+    const siblings = router.routes.filter(route =>
+      route !== wildcard && route.pattern.startsWith(prefix) && !route.pattern.includes('*'));
+
+    for (const sibling of siblings) {
+      // A concrete path for the sibling: parameters become plausible values.
+      const path = sibling.pattern.replace(/:[^/]+/g, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+      const matched = router.match(sibling.method, path);
+      assert.equal(matched?.route?.pattern, sibling.pattern,
+        `${path} resolved to ${matched?.route?.pattern} instead of ${sibling.pattern}`);
+    }
+  }
+});
+
+test('specificity, not registration order, decides a match', () => {
+  const isolated = new Router();
+  // Registered worst-first on purpose: the order must not matter.
+  isolated.get('/a/*', () => 'wildcard');
+  isolated.get('/a/:id', () => 'parameter');
+  isolated.get('/a/exact', () => 'literal');
+
+  assert.equal(isolated.match('GET', '/a/exact').route.handler(), 'literal');
+  assert.equal(isolated.match('GET', '/a/anything').route.handler(), 'parameter');
+  assert.equal(isolated.match('GET', '/a/deep/nested/path').route.handler(), 'wildcard');
 });

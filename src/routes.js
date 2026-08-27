@@ -19,6 +19,7 @@ import { githubRoutes } from './modules/projects/github.routes.js';
 import { deliverableRoutes } from './modules/projects/deliverables.routes.js';
 import { uploadRoutes } from './modules/uploads/routes.js';
 import { supabaseRoutes } from './modules/projects/supabase.routes.js';
+import { previewRoutes } from './modules/projects/preview.routes.js';
 import { adminRoutes } from './modules/admin/routes.js';
 import { taskRoutes } from './modules/agent/task.routes.js';
 import { conversationRoutes } from './modules/agent/conversation.routes.js';
@@ -41,6 +42,7 @@ export function registerRoutes(router) {
   api.use('/me', userRoutes());
   api.use('/organizations', orgRoutes());
   api.use('/projects', projectRoutes());
+  api.use('/projects', previewRoutes());
   api.use('/github', githubRoutes());
   api.use('/deliverables', deliverableRoutes());
   api.use('/uploads', uploadRoutes());

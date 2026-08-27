@@ -310,6 +310,28 @@
   .chat__welcome-body { font-size: var(--fs-sm); }
 }
 
+/* ── preview ────────────────────────────────────────────────────────────── */
+.preview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.preview__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+.preview__dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-quiet);
+}
+.preview__label { color: var(--text-muted); }
+/* White, because a page rendering on a black backdrop looks broken until it
+   has painted its own background. */
+.preview__frame { flex: 1; width: 100%; border: none; background: #fff; }
+
 /* ── deliverables ───────────────────────────────────────────────────────── */
 /* A file the agent produced. Deliberately card-shaped and not a link in a
    sentence: it is the outcome of the work, not a reference inside it. */

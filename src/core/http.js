@@ -11,26 +11,40 @@ import { logger } from './logger.js';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-/** A route path like `/api/projects/:id` compiled to a matcher. */
+/**
+ * A route path like `/api/projects/:id` compiled to a matcher.
+ *
+ * `specificity` is what stops a wildcard eating a sibling. Routing used to
+ * take the first pattern that matched, which made correctness depend on the
+ * order files happen to be imported in — fine until a proxy route needs a
+ * `*`, and then silently wrong. The most specific match wins now: literal
+ * segments beat parameters, parameters beat a wildcard, and registration
+ * order decides nothing.
+ */
 function compile(pattern) {
   const keys = [];
+  let literals = 0;
+  let wildcards = 0;
+
   const source = pattern
     .split('/')
     .map(segment => {
       if (segment.startsWith(':')) { keys.push(segment.slice(1)); return '([^/]+)'; }
-      if (segment === '*') { keys.push('wildcard'); return '(.*)'; }
+      if (segment === '*') { keys.push('wildcard'); wildcards += 1; return '(.*)'; }
+      if (segment) literals += 1;
       return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     })
     .join('/');
-  return { regex: new RegExp(`^${source}/?$`), keys };
+
+  return { regex: new RegExp(`^${source}/?$`), keys, specificity: { wildcards, literals } };
 }
 
 export class Router {
   constructor() { this.routes = []; }
 
   add(method, pattern, handler, options = {}) {
-    const { regex, keys } = compile(pattern);
-    this.routes.push({ method, pattern, regex, keys, handler, options });
+    const { regex, keys, specificity } = compile(pattern);
+    this.routes.push({ method, pattern, regex, keys, handler, options, specificity });
     return this;
   }
   get(p, h, o) { return this.add('GET', p, h, o); }
@@ -38,6 +52,17 @@ export class Router {
   put(p, h, o) { return this.add('PUT', p, h, o); }
   patch(p, h, o) { return this.add('PATCH', p, h, o); }
   delete(p, h, o) { return this.add('DELETE', p, h, o); }
+
+  /**
+   * Every method at one path.
+   *
+   * For a proxy, where the handler forwards whatever arrives rather than
+   * caring which verb it was.
+   */
+  all(p, h, o) {
+    for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']) this.add(method, p, h, o);
+    return this;
+  }
 
   /** Mount another router under a prefix. */
   use(prefix, router) {
@@ -49,16 +74,31 @@ export class Router {
 
   match(method, pathname) {
     let pathExists = false;
+    let best = null;
+    let bestMatch = null;
+
     for (const route of this.routes) {
       const m = route.regex.exec(pathname);
       if (!m) continue;
       pathExists = true;
       if (route.method !== method) continue;
-      const params = {};
-      route.keys.forEach((key, i) => { params[key] = decodeURIComponent(m[i + 1] || ''); });
-      return { route, params };
+
+      // Fewer wildcards first, then more literal segments. A tie keeps the
+      // earlier registration, so nothing that works today changes.
+      if (!best
+        || route.specificity.wildcards < best.specificity.wildcards
+        || (route.specificity.wildcards === best.specificity.wildcards
+            && route.specificity.literals > best.specificity.literals)) {
+        best = route;
+        bestMatch = m;
+      }
     }
-    return pathExists ? { methodMismatch: true } : null;
+
+    if (!best) return pathExists ? { methodMismatch: true } : null;
+
+    const params = {};
+    best.keys.forEach((key, index) => { params[key] = decodeURIComponent(bestMatch[index + 1] || ''); });
+    return { route: best, params };
   }
 }
 
