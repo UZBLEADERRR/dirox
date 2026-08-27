@@ -257,8 +257,30 @@ async function openUser(userId, onChange) {
 async function modelsSection() {
   const container = h('div', h('div.skeleton', { style: { height: '260px' } }));
 
-  async function load() {
-    const { models } = await api.get('/admin/ai/models');
+  // Filtered here rather than at the API: the catalogue is a few dozen rows,
+  // it is already loaded, and a round trip per keystroke would be slower than
+  // not searching at all.
+  const search = h('input.input', {
+    type: 'search',
+    placeholder: 'Search by name, id, provider or tier…',
+    'aria-label': 'Search models'
+  });
+
+  let catalogue = [];
+
+  function matches(model, query) {
+    if (!query) return true;
+    const haystack = [model.name, model.code, model.providerCode, model.description, ...(model.tiers || [])]
+      .filter(Boolean).join(' ').toLowerCase();
+    // Every word must appear, so "anthropic haiku" narrows rather than widens.
+    return query.toLowerCase().split(/\s+/).filter(Boolean).every(word => haystack.includes(word));
+  }
+
+  async function load(refresh = true) {
+    if (refresh) ({ models: catalogue } = await api.get('/admin/ai/models'));
+
+    const query = search.value.trim();
+    const models = catalogue.filter(model => matches(model, query));
 
     const rows = models.map(model => h('tr',
       h('td',
@@ -293,7 +315,7 @@ async function modelsSection() {
         }, model.enabled ? 'Disable' : 'Enable')))
     ));
 
-    const open = models.filter(model => model.userSelectable).length;
+    const open = catalogue.filter(model => model.userSelectable).length;
 
     mount(container,
       h('div.row.row--between', { style: { marginBottom: 'var(--s-4)', alignItems: 'flex-start' } },
@@ -301,15 +323,35 @@ async function modelsSection() {
           h('p.muted', { style: { fontSize: 'var(--fs-sm)', margin: '0' } },
             'Prices are per million tokens. Verify against the provider price list before enabling a model.'),
           h('p.subtle', { style: { fontSize: 'var(--fs-xs)', margin: 'var(--s-2) 0 0' } },
-            `Routing decides which model answers by default. Open to users decides what appears in the chat panel's model picker — ${open} of ${models.length} ${open === 1 ? 'is' : 'are'} open.`)),
+            `Routing decides which model answers by default. Open to users decides what appears in the chat panel's model picker — ${open} of ${catalogue.length} ${open === 1 ? 'is' : 'are'} open.`)),
         h('button.btn.btn--primary.btn--sm', { onClick: () => editModel(null, load) },
           icon('plus', { size: 13 }), 'Add model')),
-      tableCard('Models', [
-        ['Model'], ['Provider'], ['In / 1M', true], ['Out / 1M', true],
-        ['Context', true], ['Tiers'], ['Routing'], ['Open to users'], ['']
-      ], rows)
+
+      h('div.row', { style: { marginBottom: 'var(--s-3)' } }, search),
+
+      rows.length
+        ? tableCard(
+            query ? `${models.length} of ${catalogue.length} models` : 'Models',
+            [['Model'], ['Provider'], ['In / 1M', true], ['Out / 1M', true],
+             ['Context', true], ['Tiers'], ['Routing'], ['Open to users'], ['']],
+            rows)
+        : h('div.card.empty',
+            h('div.empty__title', `Nothing matches "${query}"`),
+            h('p.empty__body',
+              `${catalogue.length} models are configured. Try a provider name, part of a model id, or a tier such as "level2".`))
     );
+
+    // Rebuilding the panel moves the input; focus and cursor go back where the
+    // person left them.
+    if (query && document.activeElement !== search) {
+      requestAnimationFrame(() => {
+        search.focus();
+        search.setSelectionRange(query.length, query.length);
+      });
+    }
   }
+
+  search.addEventListener('input', debounce(() => load(false), 160));
 
   await load();
   return container;

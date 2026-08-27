@@ -7,8 +7,18 @@
 html {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+  /* Reserved so a page that grows a scrollbar does not shift sideways. */
   scrollbar-gutter: stable;
 }
+
+/*
+   The app shell is exactly one viewport tall and scrolls inside itself, so the
+   document never grows a scrollbar — and the reserved gutter becomes ten pixels
+   of dead space down the right, which is why the composer sat 8px from the left
+   edge and 18px from the right.
+*/
+html:has(.app) { scrollbar-gutter: auto; }
+body:has(.app) { overflow: hidden; }
 
 body {
   margin: 0;

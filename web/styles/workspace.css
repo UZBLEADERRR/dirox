@@ -193,8 +193,23 @@
    attach button was collapsing to two pixels wide. */
 .composer__tools > * { flex: none; }
 .composer__tools::-webkit-scrollbar { display: none; }
+/* A word cut in half reads as broken; a word fading out reads as "there is
+   more, scroll". Same clipping, opposite impression. */
+.composer__tools {
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+}
 .composer__spacer { flex: 1; }
 .composer__hint { font-size: var(--fs-2xs); color: var(--text-disabled); }
+
+/* Round, and no bigger than the chips beside it: the send button is the end
+   of the row, not a second subject in it. */
+.composer__send {
+  --btn-h: 34px;
+  width: var(--btn-h);
+  border-radius: var(--r-full);
+  flex: none;
+}
 
 /*
    A picker in the composer bar is a select without the box: the label reads as
@@ -255,10 +270,25 @@
 .attachment__remove:hover { color: var(--danger); }
 
 /* On a phone the keyboard hint is noise and the bar needs the room. */
-@media (max-width: 640px) {
-  .composer { padding: var(--s-3) var(--s-3) calc(var(--s-3) + env(safe-area-inset-bottom)); }
+/* Widest first. A tablet rule placed after a phone rule silently undoes it —
+   which is how the composer ended up with a 16px gutter on a 390px screen. */
+@media (max-width: 900px) {
+  .chat__inner { padding: var(--s-4) var(--s-4) var(--s-6); }
+  .composer { padding: var(--s-3) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom)); }
+  .palette { margin-top: 0; max-width: none; border-radius: var(--r-xl) var(--r-xl) 0 0; align-self: flex-end; }
   .composer__hint { display: none; }
-  .composer__input { min-height: 64px; }
+}
+
+@media (max-width: 640px) {
+  /* Nearly edge to edge. A phone has little width to spare, and a wide gutter
+     buys nothing — but zero would make the box read as part of the frame. */
+  .composer { padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom)); }
+  .composer__inner { padding: 0; max-width: none; }
+  .chat__inner { padding-left: var(--s-4); padding-right: var(--s-4); }
+  .composer__hint { display: none; }
+  .composer__input { min-height: 56px; padding: var(--s-3) var(--s-3) var(--s-1); }
+  .composer__bar { padding: var(--s-1) var(--s-2) var(--s-2); }
+  .composer__send { --btn-h: 36px; }
   .select--bare { max-width: 132px; font-size: var(--fs-xs); }
 
   /* Ragged centred buttons read as debris. Two even columns read as a menu. */
@@ -450,10 +480,3 @@
 .approval__title { font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong); }
 .approval__what { margin-top: var(--s-2); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
 .approval__actions { margin-top: var(--s-4); display: flex; gap: var(--s-2); }
-
-@media (max-width: 900px) {
-  .chat__inner { padding: var(--s-4) var(--s-4) var(--s-6); }
-  .composer { padding: var(--s-3) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom)); }
-  .palette { margin-top: 0; max-width: none; border-radius: var(--r-xl) var(--r-xl) 0 0; align-self: flex-end; }
-  .composer__hint { display: none; }
-}

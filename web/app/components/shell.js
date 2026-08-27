@@ -90,7 +90,9 @@ function syncActiveNav() {
  * must not be the thing standing between you and the Settings link.
  */
 function conversationsGroup() {
-  const list = h('div.nav-list');
+  // Its own class: a conversation title is content and stays quiet, while a
+  // destination is structure and does not.
+  const list = h('div.nav-list.nav-list--chats');
   const group = h('nav.nav-group',
     h('div.nav-group__label', h('span', 'Chats')),
     list

@@ -77,12 +77,30 @@
   padding: var(--s-2) var(--s-2);
   border-radius: var(--r-md);
   font-size: var(--fs-sm);
-  color: var(--text-muted);
+  /* Destinations are white and bold: they are the fixed structure of the
+     product, and reading them should not be work. Conversation titles below
+     stay quieter, so the two lists do not compete. */
+  font-weight: 600;
+  color: var(--text-strong);
   text-align: left;
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
-.nav-item:hover { background: var(--bg-hover); color: var(--text); }
-.nav-item[aria-current="page"] { background: var(--bg-active); color: var(--text-strong); font-weight: 500; }
+.nav-item:hover { background: var(--bg-hover); }
+.nav-item[aria-current="page"] { background: var(--bg-active); }
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 3px; height: 18px;
+  border-radius: 0 var(--r-full) var(--r-full) 0;
+  background: var(--accent);
+}
+.nav-item { position: relative; }
+
+/* A conversation is content, not a destination. */
+.nav-list--chats .nav-item { font-weight: 400; color: var(--text-muted); }
+.nav-list--chats .nav-item:hover { color: var(--text); }
+.nav-list--chats .nav-item[aria-current="page"] { color: var(--text-strong); font-weight: 500; }
 .nav-item[aria-current="page"] .nav-item__icon { color: var(--accent); }
 .nav-item__icon { flex: none; width: 16px; height: 16px; color: var(--text-subtle); }
 .nav-item__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
