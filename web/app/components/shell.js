@@ -1,10 +1,14 @@
 /**
  * The application shell.
  *
- * One sidebar holds everything: a new chat, search, recent conversations,
- * projects, and the handful of pages that are not chat. There is no bottom
- * tab bar — on a phone the same sidebar slides in as a drawer, so there is
- * one navigation to learn instead of two that disagree.
+ * One sidebar holds everything. Destinations come first — projects and the
+ * handful of pages that are not chat — because they are a fixed, short list
+ * you navigate by position. Chat history sits underneath them: it is long,
+ * it reorders itself constantly, and putting it on top would push everything
+ * else off the screen as soon as you had a few conversations.
+ *
+ * There is no bottom tab bar — on a phone the same sidebar slides in as a
+ * drawer, so there is one navigation to learn instead of two that disagree.
  *
  * Built once and reused across navigations, so switching pages never rebuilds
  * the sidebar or loses panel state. Pages call `renderInShell()` with their
@@ -42,7 +46,7 @@ let panelTabs = null;
 
 /** Everything that is not a conversation, in the order it is reached for. */
 const NAV = [
-  ['/app/projects', 'projects', 'Projects'],
+  ['/app/projects', 'projects', 'All projects'],
   ['/app/tasks', 'tasks', 'Tasks'],
   ['/app/overview', 'chart', 'Overview'],
   ['/app/settings', 'settings', 'Settings']
@@ -82,9 +86,8 @@ function syncActiveNav() {
 /**
  * Recent conversations.
  *
- * The chat list is the sidebar's centre of gravity, because chat is what the
- * product is. It is capped rather than paged: a sidebar that scrolls forever
- * is a sidebar nobody reads.
+ * Capped rather than paged, and placed last: a list that grows without bound
+ * must not be the thing standing between you and the Settings link.
  */
 function conversationsGroup() {
   const list = h('div.nav-list');
@@ -198,10 +201,10 @@ function sidebar() {
 
     h('div.sidebar__scroll',
       contextGroup,
-      conversationsGroup(),
       projectsGroup(),
       h('nav.nav-group', NAV.map(item => navItem(item))),
-      adminGroup
+      adminGroup,
+      conversationsGroup()
     ),
 
     h('div.sidebar__foot', userChip)

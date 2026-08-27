@@ -87,6 +87,7 @@
 .chat__welcome-title { font-size: var(--fs-2xl); letter-spacing: var(--tracking-tight); }
 .chat__welcome-body { margin: 0; max-width: 46ch; color: var(--text-muted); font-size: var(--fs-md); }
 .chat__suggestions { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; margin-top: var(--s-3); }
+.chat__suggestions .btn { font-size: var(--fs-sm); }
 
 .msg { display: flex; flex-direction: column; gap: var(--s-2); }
 .msg__role {
@@ -155,9 +156,11 @@
 }
 .composer__box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-quiet); }
 
+/* Room for two lines: a placeholder that wraps must not be clipped, and the
+   first thing a new user sees is the placeholder. */
 .composer__input {
   width: 100%;
-  min-height: 52px;
+  min-height: 56px;
   max-height: 240px;
   padding: var(--s-4) var(--s-4) var(--s-2);
   background: none;
@@ -186,6 +189,9 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* A scrolling row shrinks its children to nothing unless told otherwise; the
+   attach button was collapsing to two pixels wide. */
+.composer__tools > * { flex: none; }
 .composer__tools::-webkit-scrollbar { display: none; }
 .composer__spacer { flex: 1; }
 .composer__hint { font-size: var(--fs-2xs); color: var(--text-disabled); }
@@ -252,7 +258,26 @@
 @media (max-width: 640px) {
   .composer { padding: var(--s-3) var(--s-3) calc(var(--s-3) + env(safe-area-inset-bottom)); }
   .composer__hint { display: none; }
-  .select--bare { max-width: 116px; font-size: var(--fs-2xs); }
+  .composer__input { min-height: 64px; }
+  .select--bare { max-width: 132px; font-size: var(--fs-xs); }
+
+  /* Ragged centred buttons read as debris. Two even columns read as a menu. */
+  .chat__suggestions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s-2);
+    width: 100%;
+  }
+  .chat__suggestions .btn {
+    width: 100%;
+    height: auto;
+    min-height: var(--btn-h);
+    padding: var(--s-2);
+    white-space: normal;
+    line-height: var(--lh-snug);
+  }
+  .chat__welcome-title { font-size: var(--fs-xl); }
+  .chat__welcome-body { font-size: var(--fs-sm); }
 }
 
 /* ── task status strip ──────────────────────────────────────────────────── */

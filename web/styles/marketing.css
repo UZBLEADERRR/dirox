@@ -50,7 +50,7 @@
   letter-spacing: var(--tracking-tight);
   color: var(--text-strong);
 }
-.brand__name em { font-style: normal; color: var(--accent); }
+.brand__name em { font-style: normal; color: var(--accent-text); }
 
 .site-nav { display: flex; align-items: center; gap: var(--s-5); margin-left: auto; }
 .site-nav__link { font-size: var(--fs-sm); color: var(--text-muted); transition: color var(--t-fast) var(--ease); }
@@ -91,7 +91,7 @@
   letter-spacing: -0.035em;
   font-weight: 680;
 }
-.hero__title em { font-style: normal; color: var(--accent); }
+.hero__title em { font-style: normal; color: var(--accent-text); }
 
 .hero__sub {
   margin: var(--s-6) auto 0;
@@ -157,7 +157,7 @@
 .steps { margin-top: var(--s-12); display: grid; gap: 0; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .step { padding: var(--s-5) var(--s-5) var(--s-6); border-top: 2px solid var(--border); }
 .step:first-child { border-top-color: var(--accent); }
-.step__n { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--accent); }
+.step__n { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--accent-text); }
 .step__title { margin-top: var(--s-3); font-size: var(--fs-md); font-weight: 600; color: var(--text-strong); }
 .step__text { margin-top: var(--s-2); font-size: var(--fs-sm); color: var(--text-muted); }
 
@@ -248,7 +248,7 @@
   gap: var(--s-10);
 }
 .auth__quote { font-size: var(--fs-2xl); line-height: 1.3; letter-spacing: var(--tracking-tight); max-width: 20ch; }
-.auth__quote em { font-style: normal; color: var(--accent); }
+.auth__quote em { font-style: normal; color: var(--accent-text); }
 .auth__points { display: flex; flex-direction: column; gap: var(--s-3); color: var(--text-muted); font-size: var(--fs-sm); }
 .auth__points li { display: flex; gap: var(--s-3); align-items: flex-start; }
 .auth__points svg { color: var(--accent); flex: none; margin-top: 2px; }
@@ -267,7 +267,7 @@
 }
 .auth__divider::before, .auth__divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .auth__foot { margin-top: var(--s-6); text-align: center; font-size: var(--fs-sm); color: var(--text-muted); }
-.auth__foot a { color: var(--accent); }
+.auth__foot a { color: var(--accent-text); }
 .auth__notice {
   padding: var(--s-3) var(--s-4);
   border: 1px solid var(--border-strong);

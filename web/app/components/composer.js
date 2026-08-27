@@ -48,7 +48,9 @@ export function createComposer({
   let running = false;
   const attachments = [];
 
-  const defaultPlaceholder = placeholder || 'Ask DiroxCode anything, or describe what to build…';
+  // Short enough to fit one line on a phone: a clipped placeholder is the
+  // first thing a new user sees, and it reads as a broken field.
+  const defaultPlaceholder = placeholder || 'Ask DiroxCode anything…';
 
   const input = h('textarea.composer__input', {
     rows: '1',
@@ -243,6 +245,10 @@ export function createComposer({
       )
     )
   );
+
+  // The placeholder alone can need two lines, so the box is sized before it is
+  // ever typed into rather than on the first keystroke.
+  requestAnimationFrame(autoResize);
 
   return {
     element,
