@@ -14,6 +14,7 @@
 import { fileTools } from './files.js';
 import { terminalTools } from './terminal.js';
 import { gitTools } from './git.js';
+import { githubTools, GITHUB_TOOL_NAMES } from './github.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
 import { parse, toJsonSchema } from '../../core/validate.js';
@@ -24,7 +25,7 @@ import { serviceClient, hasServiceRole } from '../../db/supabase.js';
 import { runtimeStats } from '../../modules/observability/audit.js';
 import { logger } from '../../core/logger.js';
 
-const ALL_TOOLS = [...fileTools, ...terminalTools, ...gitTools, ...projectTools, ...previewTools];
+const ALL_TOOLS = [...fileTools, ...terminalTools, ...gitTools, ...githubTools, ...projectTools, ...previewTools];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -49,6 +50,13 @@ const PREVIEW_TOOL_NAMES = new Set(previewTools.map(tool => tool.name));
  * omits project inspection and memory recall because retrieval already puts
  * both in front of the model — paying for the schema as well is paying twice.
  */
+/**
+ * The GitHub tools a question can need. Added to a small toolset only when the
+ * message actually mentions GitHub: they are cheap individually and about 400
+ * tokens together, which is most of a cheap question's budget.
+ */
+const GITHUB_READ = ['github_account', 'github_repositories', 'github_pull_requests', 'github_issues', 'github_checks'];
+
 const TOOLSETS = {
   none: [],
   read: ['read_file', 'search_code', 'find_symbol', 'list_directory'],
@@ -57,9 +65,13 @@ const TOOLSETS = {
 
 /**
  * @param {{mode?:string, intent?:string, toolset?:string, featureFlags?:object,
- *          hasRepository?:boolean, hasDevCommand?:boolean}} options
+ *          hasRepository?:boolean, hasDevCommand?:boolean, hasGitHub?:boolean,
+ *          includeGitHub?:boolean}} options
  */
-export function toolsFor({ mode = 'agent', toolset, featureFlags = {}, hasRepository = false, hasDevCommand = false } = {}) {
+export function toolsFor({
+  mode = 'agent', toolset, featureFlags = {}, includeGitHub = false,
+  hasRepository = false, hasDevCommand = false, hasGitHub = true
+} = {}) {
   // The intent profile decides first: it can refuse tools outright, which no
   // amount of later filtering can do as cheaply.
   if (toolset === 'none') return [];
@@ -68,6 +80,7 @@ export function toolsFor({ mode = 'agent', toolset, featureFlags = {}, hasReposi
 
   if (toolset && TOOLSETS[toolset]) {
     const allowed = new Set(TOOLSETS[toolset]);
+    if (includeGitHub) for (const name of GITHUB_READ) allowed.add(name);
     tools = tools.filter(tool => allowed.has(tool.name));
   }
 
@@ -77,8 +90,14 @@ export function toolsFor({ mode = 'agent', toolset, featureFlags = {}, hasReposi
   if (mode === 'edit') {
     tools = tools.filter(tool => [RISK.SAFE, RISK.WRITE].includes(tool.risk) && !tool.name.startsWith('git_'));
   }
+  // `git_*` works on the checked-out workspace, so it needs one. `github_*`
+  // talks to the user's account and does not: "which repositories do I have"
+  // is a fair question to ask before any of them is open.
   if (!hasRepository) {
     tools = tools.filter(tool => !tool.name.startsWith('git_'));
+  }
+  if (featureFlags.github === false || !hasGitHub) {
+    tools = tools.filter(tool => !GITHUB_TOOL_NAMES.has(tool.name));
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));

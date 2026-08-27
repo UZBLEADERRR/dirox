@@ -363,7 +363,9 @@ export async function runTask(task, options) {
       toolset: intent.profile.toolset,
       featureFlags: options.featureFlags || {},
       hasRepository: Boolean(project),
-      hasDevCommand: Boolean(project?.dev_command)
+      hasDevCommand: Boolean(project?.dev_command),
+      hasGitHub: options.hasGitHub !== false,
+      includeGitHub: intent.profile.github === true
     });
 
     const maxIterations = Math.min(Number(task.max_iterations) || defaults.max_iterations, 40);

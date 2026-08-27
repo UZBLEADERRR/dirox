@@ -14,7 +14,15 @@ import { notify } from '../notifications/routes.js';
 import { registerHandler } from '../../queue/worker.js';
 import { enqueue, QUEUES } from '../../queue/queue.js';
 import { allFeatureFlags } from '../../ai/catalog.js';
+import { getIntegration } from '../projects/github.js';
+import { config } from '../../config/env.js';
 import { invalidatePlanUsage } from '../billing/usage.js';
+
+/** Has this user connected GitHub, and can the deployment talk to it at all? */
+async function githubConnected(userId) {
+  if (!config.github.clientId) return false;
+  return Boolean(await getIntegration(userId, 'github').catch(() => null));
+}
 
 /** taskId -> { controller, subscribers, buffer, approvedCalls, finished } */
 const active = new Map();
@@ -78,11 +86,18 @@ export async function startTask(task, { project, auth, trust, allowedTiers, pref
   active.set(task.id, run);
 
   const emit = emitter(task.id);
-  const featureFlags = await allFeatureFlags(auth.org.id).catch(() => ({}));
+
+  // A tool that can only ever return "connect your account first" is worse
+  // than no tool: it costs schema tokens on every call and invites the model
+  // to try. So the GitHub tools are offered only to a user who has connected.
+  const [featureFlags, hasGitHub] = await Promise.all([
+    allFeatureFlags(auth.org.id).catch(() => ({})),
+    githubConnected(auth.user.id)
+  ]);
 
   const promise = runTask(task, {
     project, auth, emit, signal: controller.signal, approvedCalls,
-    trust, allowedTiers, preferredModelId, autoTest, featureFlags
+    trust, allowedTiers, preferredModelId, autoTest, featureFlags, hasGitHub
   })
     .then(async result => {
       run.finished = true;

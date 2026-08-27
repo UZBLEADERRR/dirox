@@ -27,6 +27,23 @@ const CODEBASE = /\b(this (code|project|repo|file|function|component)|the (codeb
 /** Signals that something must actually change. */
 const MUTATION = /\b(add|create|build|implement|write|fix|repair|refactor|rename|move|delete|remove|update|change|modify|migrate|install|integrate|optimi[sz]e|upgrade|test|deploy|generate|setup|set up)\b/i;
 
+/**
+ * Signals that the question is about the user's GitHub account rather than the
+ * checked-out code. The GitHub tools cost about 400 tokens of schema, which is
+ * most of a cheap question's budget, so they travel only when asked for.
+ */
+const GITHUB = new RegExp([
+  'github',                       // and githubim, githubimni, githubga …
+  '\\bgh\\b',
+  'pull requests?', '\\bPRs?\\b', 'merge requests?',
+  // Uzbek agglutinates: repo, repolar, repolarim, repolarimni. The suffix
+  // list is explicit rather than \\w* so "report" is not a repository.
+  'repositor(y|ies)', '\\brepo(s|lar\\w*|sitor(y|ies))?\\b',
+  '\\bissues?\\b',
+  '\\bCI\\b', 'workflow', 'action runs?',
+  '\\bcommits?\\b', '\\bbranch(es)?\\b'
+].join('|'), 'i');
+
 /** Signals a failure to diagnose. */
 const FAILURE = /\b(error|exception|stack ?trace|traceback|crash|fail(s|ed|ing)?|broken|not working|doesn'?t work|bug|500|404|undefined is not|cannot read)\b/i;
 
@@ -87,8 +104,11 @@ export function classifyIntent({ text = '', mode = 'agent', hasProject = false, 
   const source = String(text).trim();
   const words = source.split(/\s+/).filter(Boolean).length;
 
+  // The profile is derived per message, not shared: whether the GitHub tools
+  // are worth their schema depends on what was actually asked.
+  const github = GITHUB.test(source);
   const decide = (intent, confidence, reason) => ({
-    intent, profile: PROFILES[intent], confidence, reason
+    intent, profile: { ...PROFILES[intent], github }, confidence, reason
   });
 
   // An explicit mode is a stated intent; it outranks any guess.
@@ -104,6 +124,16 @@ export function classifyIntent({ text = '', mode = 'agent', hasProject = false, 
   if (COURTESY.test(source)) return decide('chat', 0.98, 'courtesy message');
   if (GREETING.test(source) && words <= 6) return decide('chat', 0.97, 'greeting');
   if (META.test(source)) return decide('chat', 0.9, 'question about DiroxCode itself');
+
+  // A message naming GitHub always has something to look up, however short.
+  // "githubimni tekshir" is two words and is emphatically not small talk.
+  if (github) {
+    // "open a pull request" is work, "list my pull requests" is a question,
+    // and the verb is the only thing that separates them.
+    const acts = MUTATION.test(source) || /\b(open|raise|submit|merge|close|comment|approve|reopen|draft)\b/i.test(source);
+    return decide(acts ? 'code' : 'ask', 0.85, 'refers to the GitHub account');
+  }
+
   if (words <= 2 && !MUTATION.test(source)) return decide('chat', 0.85, 'too short to reference anything');
 
   // Without a project there is nothing to retrieve or edit, so the heavy
@@ -155,7 +185,14 @@ export function parseIntent(text, fallback) {
     const match = String(text).match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(match ? match[0] : text);
     if (!INTENTS.includes(parsed.intent)) return fallback;
-    return { intent: parsed.intent, profile: PROFILES[parsed.intent], confidence: 0.9, reason: 'classified by model' };
+    return {
+      intent: parsed.intent,
+      // The model settles the intent; whether GitHub was mentioned is a fact
+      // about the message and is carried over unchanged.
+      profile: { ...PROFILES[parsed.intent], github: fallback?.profile?.github === true },
+      confidence: 0.9,
+      reason: 'classified by model'
+    };
   } catch {
     return fallback;
   }

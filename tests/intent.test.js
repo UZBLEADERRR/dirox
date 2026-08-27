@@ -149,3 +149,58 @@ test('history is capped by the intent, not by the caller', async () => {
   const turns = context.messages.filter(m => m.role !== 'system').length;
   assert.ok(turns <= PROFILES.chat.historyTurns + 1, `${turns} turns survived a 4-turn cap`);
 });
+
+// ─── GitHub ─────────────────────────────────────────────────────────────────
+//
+// The GitHub tools are about 400 tokens of schema — most of a cheap question's
+// budget — so they travel only when the message asks for them. Which makes
+// "does this message mean GitHub?" a decision worth testing rather than
+// trusting.
+
+test('a message about GitHub is never small talk, however short', () => {
+  for (const text of ['githubimni tekshir', 'github', 'check my github', 'repolarimni korsat']) {
+    const result = classifyIntent({ text, hasProject: true });
+    assert.notEqual(result.intent, 'chat', `"${text}" was treated as small talk`);
+    assert.equal(result.profile.github, true, `"${text}" did not ask for the GitHub tools`);
+  }
+});
+
+test('reading GitHub is a question; changing it is work', () => {
+  assert.equal(classifyIntent({ text: 'list my pull requests', hasProject: true }).intent, 'ask');
+  assert.equal(classifyIntent({ text: 'is CI green on main?', hasProject: true }).intent, 'ask');
+  assert.equal(classifyIntent({ text: 'open a pull request for this branch', hasProject: true }).intent, 'code');
+  assert.equal(classifyIntent({ text: 'merge the pull request', hasProject: true }).intent, 'code');
+});
+
+test('words that merely start like "repo" are not GitHub', () => {
+  for (const text of ['report the results', 'reposition the header', 'repossess the build']) {
+    assert.equal(classifyIntent({ text, hasProject: true }).profile.github, false, `"${text}"`);
+  }
+});
+
+test('a plain question does not pay for the GitHub tools', () => {
+  const plain = classifyIntent({ text: 'what does the model router do here?', hasProject: true });
+  const github = classifyIntent({ text: 'what pull requests are open?', hasProject: true });
+
+  const cost = profile => estimateTokens(JSON.stringify(toolDefinitions(
+    toolsFor({ mode: 'agent', toolset: profile.toolset, hasRepository: true, includeGitHub: profile.github }))));
+
+  assert.ok(cost(plain.profile) < 600, `a plain question costs ${cost(plain.profile)} tokens of schema`);
+  assert.ok(cost(github.profile) > cost(plain.profile), 'a GitHub question should carry the GitHub tools');
+});
+
+test('the GitHub tools stay away from a user who has not connected one', () => {
+  const names = toolsFor({ mode: 'agent', hasRepository: true, hasGitHub: false }).map(tool => tool.name);
+  assert.ok(!names.some(name => name.startsWith('github_')),
+    'a tool that can only answer "connect your account" costs schema and invites a wasted call');
+});
+
+test('opening a pull request always asks, whatever the trust level', async () => {
+  const { githubTools } = await import('../src/agent/tools/github.js');
+  const open = githubTools.find(tool => tool.name === 'github_open_pull_request');
+  assert.equal(open.risk, 'outward', 'publishing to a shared repository is not a silent action');
+
+  for (const tool of githubTools.filter(t => t.name !== 'github_open_pull_request')) {
+    assert.equal(tool.risk, 'safe', `${tool.name} should be read-only`);
+  }
+});

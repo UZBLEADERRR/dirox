@@ -172,6 +172,77 @@ export async function getFileContent(token, fullName, path, ref) {
   return null;
 }
 
+/**
+ * Read-only views a person would ask for by name: "what am I working on",
+ * "any open pull requests", "what is failing".
+ *
+ * Each returns a small shaped object rather than GitHub's payload, because the
+ * caller is usually a language model and a raw repository object is roughly a
+ * thousand tokens of metadata nobody reads.
+ */
+export async function listPullRequests(token, fullName, { state = 'open', perPage = 20 } = {}) {
+  const pulls = await githubRequest(token, `/repos/${fullName}/pulls?state=${state}&per_page=${perPage}&sort=updated&direction=desc`);
+  return (pulls || []).map(pull => ({
+    number: pull.number,
+    title: pull.title,
+    state: pull.draft ? 'draft' : pull.state,
+    author: pull.user?.login,
+    head: pull.head?.ref,
+    base: pull.base?.ref,
+    url: pull.html_url,
+    updatedAt: pull.updated_at
+  }));
+}
+
+export async function listIssues(token, fullName, { state = 'open', perPage = 20 } = {}) {
+  const issues = await githubRequest(token, `/repos/${fullName}/issues?state=${state}&per_page=${perPage}&sort=updated&direction=desc`);
+  // GitHub returns pull requests from the issues endpoint; they are not issues.
+  return (issues || []).filter(issue => !issue.pull_request).map(issue => ({
+    number: issue.number,
+    title: issue.title,
+    state: issue.state,
+    author: issue.user?.login,
+    labels: (issue.labels || []).map(label => label.name ?? label),
+    comments: issue.comments,
+    url: issue.html_url,
+    updatedAt: issue.updated_at
+  }));
+}
+
+/** The most recent commits on a branch. */
+export async function listCommits(token, fullName, { ref, perPage = 15 } = {}) {
+  const query = new URLSearchParams({ per_page: String(perPage) });
+  if (ref) query.set('sha', ref);
+  const commits = await githubRequest(token, `/repos/${fullName}/commits?${query}`);
+  return (commits || []).map(entry => ({
+    sha: entry.sha?.slice(0, 8),
+    message: String(entry.commit?.message || '').split('\n')[0].slice(0, 140),
+    author: entry.commit?.author?.name || entry.author?.login,
+    date: entry.commit?.author?.date
+  }));
+}
+
+/** The state of the checks on a ref — what a person means by "is CI green". */
+export async function checkStatus(token, fullName, ref) {
+  const [runs, status] = await Promise.all([
+    githubRequest(token, `/repos/${fullName}/commits/${encodeURIComponent(ref)}/check-runs?per_page=30`).catch(() => null),
+    githubRequest(token, `/repos/${fullName}/commits/${encodeURIComponent(ref)}/status`).catch(() => null)
+  ]);
+
+  const checks = (runs?.check_runs || []).map(run => ({
+    name: run.name,
+    status: run.status,
+    conclusion: run.conclusion,
+    url: run.html_url
+  }));
+
+  return {
+    state: status?.state ?? (checks.some(check => check.conclusion === 'failure') ? 'failure' : 'unknown'),
+    checks,
+    failing: checks.filter(check => ['failure', 'timed_out', 'cancelled'].includes(check.conclusion)).map(check => check.name)
+  };
+}
+
 // ─── token storage ──────────────────────────────────────────────────────────
 
 /** Repository tokens live encrypted on the repositories row. */
