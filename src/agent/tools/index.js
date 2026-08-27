@@ -21,6 +21,7 @@ import { loaderTools } from './loader.js';
 import { delegateTools } from './delegate.js';
 import { planTools, PLAN_TOOL_NAMES } from './plan.js';
 import { webTools, WEB_TOOL_NAMES } from './web.js';
+import { screenshotTools } from './screenshot.js';
 import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
@@ -36,7 +37,7 @@ import { logger } from '../../core/logger.js';
 const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
   ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
-  ...loaderTools, ...delegateTools, ...planTools, ...webTools
+  ...loaderTools, ...delegateTools, ...planTools, ...webTools, ...screenshotTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -143,6 +144,12 @@ export function toolsFor({
   // ever return an error, so they are not offered at all.
   if (featureFlags.visual_agent === false || !hasDevCommand) {
     tools = tools.filter(tool => !PREVIEW_TOOL_NAMES.has(tool.name));
+  }
+  // A screenshot needs somewhere to save the file, and it takes a full URL as
+  // happily as a preview path — so it survives a project without a dev
+  // command, and disappears without a project.
+  if (!hasRepository || featureFlags.visual_agent === false) {
+    tools = tools.filter(tool => tool.name !== 'screenshot_page');
   }
 
   /*

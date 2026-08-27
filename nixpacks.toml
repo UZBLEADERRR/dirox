@@ -1,0 +1,34 @@
+# Build configuration for Railway's Nixpacks builder.
+#
+# The application itself needs nothing built: zero runtime dependencies, no
+# bundler, ES modules served as written. This file exists for the two things
+# the *container* needs that the language runtime does not provide.
+#
+#   chromium   so the agent can open a page, photograph it and report what is
+#              measurably wrong with the layout. Without it `screenshot_page`
+#              says so and the run continues — but a product that shows a
+#              person the change it made is a different product from one that
+#              describes it.
+#
+#   git        the agent works in real repositories, and `git status`, `git
+#              diff` and `git commit` are tools it is given.
+#
+# Chromium is large, and that is the honest cost of this: roughly 300MB in the
+# image. It is worth it here because seeing the page is the difference between
+# "I updated the stylesheet" and "the button was two pixels wide; here it is".
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "chromium", "git", "unzip", "zip"]
+
+[variables]
+# Where the agent looks first. Nix puts the binary on PATH, and this resolves
+# it once at build time so the container does not have to search at runtime.
+CHROMIUM_PATH = "/root/.nix-profile/bin/chromium"
+
+# The container has no user namespace, so Chrome's own sandbox cannot start.
+# The pages it opens are the user's own dev server on loopback, or a URL the
+# agent fetched — the isolation that matters is the container's.
+CHROME_DEVEL_SANDBOX = ""
+
+[start]
+cmd = "npm start"

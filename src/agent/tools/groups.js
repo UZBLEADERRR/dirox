@@ -60,8 +60,8 @@ export const TOOL_GROUPS = {
     tools: ['deliver_file', 'place_upload', 'list_uploads']
   },
   preview: {
-    summary: 'Running the app and looking at it: start a dev server, inspect a page, stop it.',
-    tools: ['open_preview', 'inspect_page', 'preview_status', 'close_preview']
+    summary: 'Running the app and looking at it: start a dev server, read a page, photograph it in a real browser and get back what is measurably wrong with the layout, stop it.',
+    tools: ['open_preview', 'inspect_page', 'screenshot_page', 'preview_status', 'close_preview']
   },
   memory: {
     summary: 'Remembering decisions and conventions across tasks, and recalling them.',
@@ -97,7 +97,7 @@ const HINTS = [
   [/\bcommit|branch|\bgit\b|revert|merge\b/i, 'git'],
   [/\bzip\b|download|export|send me|\bapk\b|\bpdf\b|upload|logo|attach/i, 'delivery'],
   [/\bbuild\b|\bcompile|dependenc|\binstall\b|\bnpm i\b|lint/i, 'build'],
-  [/\bpreview|screenshot|render|browser|\bpage\b|\bUI\b|looks?\b/i, 'preview'],
+  [/\bpreview|screenshot|render|browser|\bpage\b|\bUI\b|looks?\b|design|layout|mobile|responsive/i, 'preview'],
   [/\bsecret|credential|leak|\.env\b/i, 'security'],
   // A task that names the outside world will need the outside world on its
   // first step; making it ask for the group is a wasted round trip.

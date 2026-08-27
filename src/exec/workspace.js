@@ -186,6 +186,27 @@ export async function writeWorkspaceFile(projectId, path, content, { createDirec
   };
 }
 
+/**
+ * Write bytes rather than text.
+ *
+ * `writeWorkspaceFile` stringifies its content, which is right for source and
+ * silently destroys a PNG. Kept separate rather than made polymorphic: a
+ * function that guesses whether its argument is text is a function that
+ * guesses wrong on a Buffer that happens to be valid UTF-8.
+ */
+export async function writeWorkspaceBinary(projectId, path, buffer) {
+  if (isSecretPath(path)) throw forbidden('Writing credential files is not permitted');
+  const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  if (bytes.byteLength > MAX_FILE_BYTES) throw payloadTooLarge('File content exceeds the 2MB write limit');
+
+  const full = await resolveInside(projectId, path);
+  await mkdir(dirname(full), { recursive: true });
+  await writeFile(full, bytes);
+  await mirror('persistFile', projectId, path, bytes);
+
+  return { path: String(path).replace(/^[/\\]+/, ''), bytes: bytes.byteLength };
+}
+
 export async function deleteWorkspacePath(projectId, path) {
   const full = await resolveInside(projectId, path);
   if (full === workspacePath(projectId)) throw forbidden('The workspace root cannot be deleted');
