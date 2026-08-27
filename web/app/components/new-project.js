@@ -126,7 +126,37 @@ function githubPanel(close) {
         }
         mount(list, repositories.map(repoRow));
       } catch (error) {
-        mount(list, h('div.empty', h('p.empty__body', error.message)));
+        /*
+           A rejected token is not a search failure.
+
+           GitHub answers "Bad credentials", which under the word "Connected"
+           tells nobody anything. The server clears the connection when that
+           happens, so the honest thing to show is what to do next — and a
+           button that does it.
+        */
+        const expired = /credential|reconnect|connect github again|no longer valid/i.test(error.message || '');
+        mount(list, h('div.empty',
+          h('div.empty__title', expired ? 'GitHub needs connecting again' : 'Could not list your repositories'),
+          h('p.empty__body', expired
+            ? 'GitHub rejected the saved access, so it has been cleared. This happens when the authorisation is revoked or expires.'
+            : error.message),
+          expired
+            ? h('button.btn.btn--primary.btn--sm', {
+              style: { marginTop: 'var(--s-3)' },
+              // The same handshake as the first connection: the bearer token
+              // cannot ride a redirect, so the URL is asked for and followed.
+              onClick: async event => {
+                event.currentTarget.disabled = true;
+                try {
+                  const { url } = await api.post('/github/connect', { returnTo: location.pathname });
+                  location.href = url;
+                } catch (problem) {
+                  toastError(problem, 'GitHub could not be reached');
+                  event.currentTarget.disabled = false;
+                }
+              }
+            }, 'Connect GitHub')
+            : null));
       }
     };
 

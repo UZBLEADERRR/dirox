@@ -15,7 +15,7 @@ import { serviceClient, hasServiceRole } from '../../db/supabase.js';
 import { loadProject } from './routes.js';
 import {
   beginOAuth, consumeState, exchangeCode, getViewer, listRepositories, listBranches,
-  saveIntegration, getIntegration, getIntegrationToken, revokeIntegration,
+  saveIntegration, getIntegration, getIntegrationToken, revokeIntegration, asGitHubUser,
   createPullRequest, repositoryToken
 } from './github.js';
 import { queueImport } from './service.js';
@@ -82,22 +82,20 @@ export function githubRoutes() {
   }, { auth: true });
 
   router.get('/repositories', async ctx => {
-    const token = await getIntegrationToken(ctx.auth.user.id, 'github');
-    if (!token) throw badRequest('Connect your GitHub account first');
-    const repositories = await listRepositories(token, {
+    // Through `asGitHubUser`, so a token GitHub has stopped accepting clears
+    // itself rather than showing "Bad credentials" under the word "Connected".
+    const repositories = await asGitHubUser(ctx.auth.user.id, token => listRepositories(token, {
       page: Math.max(1, Number(ctx.query.page) || 1),
       perPage: Math.min(100, Number(ctx.query.perPage) || 50),
       query: String(ctx.query.q || '').slice(0, 80)
-    });
+    }));
     return sendJson(ctx.res, 200, { repositories });
   }, { auth: true, rateLimit: 'heavy' });
 
   router.get('/repositories/:owner/:name/branches', async ctx => {
-    const token = await getIntegrationToken(ctx.auth.user.id, 'github');
-    if (!token) throw badRequest('Connect your GitHub account first');
     const fullName = `${ctx.params.owner}/${ctx.params.name}`;
     if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) throw badRequest('Invalid repository name');
-    const branches = await listBranches(token, fullName);
+    const branches = await asGitHubUser(ctx.auth.user.id, token => listBranches(token, fullName));
     return sendJson(ctx.res, 200, { branches });
   }, { auth: true });
 

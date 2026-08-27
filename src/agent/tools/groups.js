@@ -39,9 +39,10 @@ export const TOOL_GROUPS = {
     tools: ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_commit', 'git_revert', 'git_push']
   },
   github: {
-    summary: 'The user\'s GitHub account: repositories, branches, pull requests, issues, commits, CI status, and opening a pull request.',
+    summary: 'The user\'s GitHub account: read repositories, branches, pull requests, issues, commits and CI status; create a new repository; commit a file; open a pull request.',
     tools: ['github_account', 'github_repositories', 'github_branches', 'github_pull_requests',
-            'github_issues', 'github_commits', 'github_checks', 'github_read_file', 'github_open_pull_request']
+            'github_issues', 'github_commits', 'github_checks', 'github_read_file', 'github_open_pull_request',
+            'github_create_repository', 'github_write_file']
   },
   database: {
     summary: 'The user\'s connected Supabase project: read the schema, query it, run SQL, apply a migration.',

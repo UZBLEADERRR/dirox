@@ -17,10 +17,11 @@
 import { t } from '../../core/validate.js';
 import { RISK } from '../permissions.js';
 import { badRequest, notConfigured } from '../../core/errors.js';
-import { getIntegrationToken } from '../../modules/projects/github.js';
+import { getIntegrationToken, revokeIntegration } from '../../modules/projects/github.js';
 import {
   getViewer, listRepositories, listBranches, listPullRequests, listIssues,
-  listCommits, checkStatus, getFileContent, createPullRequest
+  listCommits, checkStatus, getFileContent, createPullRequest,
+  createRepository, putFile
 } from '../../modules/projects/github.js';
 
 /**
@@ -36,6 +37,30 @@ async function token(ctx) {
     throw badRequest('No GitHub account is connected. Connect one in Settings → Developer, then try again.');
   }
   return value;
+}
+
+/**
+ * Call GitHub, and believe it about the token.
+ *
+ * A 401 means the token is dead — revoked in the user's settings, or expired —
+ * not that the request was unlucky. Clearing the stored connection makes the
+ * whole product agree at once: settings offers Connect again, and the next run
+ * is not handed tools that can only return "Bad credentials".
+ */
+async function call(ctx, fn) {
+  const value = await token(ctx);
+  try {
+    return await fn(value);
+  } catch (error) {
+    if (error?.status === 401) {
+      await revokeIntegration(ctx.userId, 'github').catch(() => {});
+      throw badRequest(
+        'GitHub rejected the stored credentials, so the connection has been cleared. '
+        + 'Ask the user to connect GitHub again in Settings → Developer — the access was revoked or has expired.'
+      );
+    }
+    throw error;
+  }
 }
 
 /** Repository names are user input that becomes a URL path. */
@@ -60,7 +85,7 @@ export const githubTools = [
     description: 'Check which GitHub account is connected, and confirm the connection works.',
     schema: t.object({}),
     async run(_args, ctx) {
-      const viewer = await getViewer(await token(ctx));
+      const viewer = await call(ctx, getViewer);
       return {
         output: `Connected as ${viewer.login}${viewer.name ? ` (${viewer.name})` : ''}${viewer.email ? ` · ${viewer.email}` : ''}`,
         metadata: { login: viewer.login }
@@ -77,7 +102,7 @@ export const githubTools = [
       limit: t.integer({ min: 1, max: 50, default: 20 })
     }),
     async run({ query, limit }, ctx) {
-      const repos = await listRepositories(await token(ctx), { query: query || '', perPage: limit });
+      const repos = await call(ctx, key => listRepositories(key, { query: query || '', perPage: limit }));
       return {
         output: repos.length
           ? `${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'}:\n${table(repos, [
@@ -102,7 +127,7 @@ export const githubTools = [
     }),
     async run(args, ctx) {
       const name = repository(args.repository, ctx);
-      const branches = await listBranches(await token(ctx), name);
+      const branches = await call(ctx, key => listBranches(key, name));
       return {
         output: `${name} — ${branches.length} branch(es):\n${branches.map(branch => `${branch.name}  ${branch.sha?.slice(0, 8) ?? ''}`).join('\n')}`,
         metadata: { count: branches.length }
@@ -121,7 +146,7 @@ export const githubTools = [
     }),
     async run(args, ctx) {
       const name = repository(args.repository, ctx);
-      const pulls = await listPullRequests(await token(ctx), name, { state: args.state, perPage: args.limit });
+      const pulls = await call(ctx, key => listPullRequests(key, name, { state: args.state, perPage: args.limit }));
       return {
         output: `${name} — ${pulls.length} ${args.state} pull request(s):\n${table(pulls, [
           ['number', pull => `#${pull.number}`],
@@ -146,7 +171,7 @@ export const githubTools = [
     }),
     async run(args, ctx) {
       const name = repository(args.repository, ctx);
-      const issues = await listIssues(await token(ctx), name, { state: args.state, perPage: args.limit });
+      const issues = await call(ctx, key => listIssues(key, name, { state: args.state, perPage: args.limit }));
       return {
         output: `${name} — ${issues.length} ${args.state} issue(s):\n${table(issues, [
           ['number', issue => `#${issue.number}`],
@@ -170,7 +195,7 @@ export const githubTools = [
     }),
     async run(args, ctx) {
       const name = repository(args.repository, ctx);
-      const commits = await listCommits(await token(ctx), name, { ref: args.ref, perPage: args.limit });
+      const commits = await call(ctx, key => listCommits(key, name, { ref: args.ref, perPage: args.limit }));
       return {
         output: `${name}${args.ref ? ` @ ${args.ref}` : ''}:\n${commits.map(commit =>
           `${commit.sha}  ${commit.message}  — ${commit.author}, ${String(commit.date || '').slice(0, 10)}`).join('\n')}`,
@@ -189,7 +214,7 @@ export const githubTools = [
     }),
     async run(args, ctx) {
       const name = repository(args.repository, ctx);
-      const result = await checkStatus(await token(ctx), name, args.ref);
+      const result = await call(ctx, key => checkStatus(key, name, args.ref));
       const summary = result.failing.length
         ? `Failing: ${result.failing.join(', ')}`
         : result.checks.length ? 'All checks passed.' : 'No checks reported for this ref.';
@@ -215,7 +240,7 @@ export const githubTools = [
     }),
     async run(args, ctx) {
       const name = repository(args.repository, ctx);
-      const content = await getFileContent(await token(ctx), name, args.path, args.ref);
+      const content = await call(ctx, key => getFileContent(key, name, args.path, args.ref));
       if (content === null) {
         return { ok: false, output: `${args.path} is not a text file, or does not exist in ${name}.` };
       }
@@ -249,6 +274,74 @@ export const githubTools = [
       return {
         output: `Opened ${name}#${pull.number}: ${pull.title}\n${pull.html_url}`,
         metadata: { number: pull.number, url: pull.html_url }
+      };
+    }
+  },
+
+  {
+    name: 'github_create_repository',
+    // It makes something on the user's account under their name. That is not
+    // an edit to a working copy, and it should not happen without them seeing.
+    risk: RISK.OUTWARD,
+    description:
+      'Create a new repository on the connected GitHub account. Use this when the user asks for something to be put on GitHub that does not exist yet — a new bot, a new service, a new project. '
+      + 'It comes back with a first commit and a default branch, ready for github_write_file or a push.',
+    schema: t.object({
+      name: t.string({ required: true, max: 100, description: 'Repository name, for example "telegram-order-bot"' }),
+      description: t.string({ max: 350, description: 'One line on what it is' }),
+      private: t.boolean({ default: true, description: 'Private unless the user asked for it to be public' })
+    }),
+    async run(args, ctx) {
+      // GitHub is stricter than the message will be: a name with spaces gets
+      // silently rewritten, which produces a repository nobody can find again.
+      const name = String(args.name).trim().replace(/\s+/g, '-');
+      if (!/^[\w.-]{1,100}$/.test(name)) {
+        throw badRequest(`"${args.name}" is not a repository name. Use letters, numbers, dots, dashes and underscores.`);
+      }
+
+      const repo = await call(ctx, key => createRepository(key, {
+        name, description: args.description, isPrivate: args.private !== false
+      }));
+
+      return {
+        output: [
+          `Created ${repo.full_name}${repo.private ? ' (private)' : ' (public)'}.`,
+          repo.html_url,
+          `Default branch: ${repo.default_branch}. Clone URL: ${repo.clone_url}`,
+          'Add files with github_write_file, or set it as this project\'s remote and push.'
+        ].join('\n'),
+        metadata: { fullName: repo.full_name, url: repo.html_url, cloneUrl: repo.clone_url, defaultBranch: repo.default_branch }
+      };
+    }
+  },
+
+  {
+    name: 'github_write_file',
+    risk: RISK.OUTWARD,
+    description:
+      'Commit one file straight to a GitHub repository, creating or replacing it. '
+      + 'Use this for a handful of files in a repository you are not working in locally — a new bot\'s source, a README, a workflow. For a repository checked out here, edit and push instead.',
+    schema: t.object({
+      repository: t.string({ max: 140, description: 'owner/name; defaults to this project\'s repository' }),
+      path: t.string({ required: true, max: 300, description: 'Path inside the repository' }),
+      content: t.string({ required: true, max: 200_000 }),
+      message: t.string({ max: 200, description: 'Commit message' }),
+      branch: t.string({ max: 120, description: 'Defaults to the repository\'s default branch' })
+    }),
+    async run(args, ctx) {
+      const name = repository(args.repository, ctx);
+      const path = String(args.path).replace(/^\/+/, '');
+      if (!path || path.includes('..')) throw badRequest('Give a path inside the repository.');
+
+      const result = await call(ctx, key => putFile(key, name, path, {
+        content: args.content,
+        message: args.message || `Add ${path}`,
+        branch: args.branch
+      }));
+
+      return {
+        output: `Committed ${path} to ${name}${args.branch ? ` on ${args.branch}` : ''}.\n${result.commit?.html_url ?? ''}`,
+        metadata: { path, repository: name, sha: result.content?.sha }
       };
     }
   }

@@ -454,6 +454,32 @@ export async function render({ params, query = {} }) {
       });
     }
 
+    /*
+       The repository, said out loud.
+
+       "Project" and "repository" are the same thing here, and the menu was
+       only ever naming one of them — so a person looking for where to pick a
+       repo found a project list and could not tell whether it was the same
+       question. Naming the repo, and offering somewhere to change it, answers
+       that without a second concept.
+    */
+    if (project?.repository) {
+      items.push({
+        label: 'Repository',
+        control: h('a.menu__value', { href: project.repository.htmlUrl, target: '_blank', rel: 'noreferrer' },
+          project.repository.fullName),
+        hint: `Branch ${project.repository.defaultBranch || 'main'}. Change it in project settings.`
+      });
+    } else if (projectId) {
+      items.push({
+        label: 'Repository',
+        control: h('button.btn.btn--sm', {
+          onClick: () => router.navigate(`/app/projects/${projectId}`)
+        }, 'Connect a repository'),
+        hint: 'This project has no GitHub repository yet.'
+      });
+    }
+
     items.push({ label: 'New chat', onSelect: () => router.navigate(projectId ? `/app/projects/${projectId}/chat` : '/app') });
     if (projectId) items.push({ label: 'Project settings', onSelect: () => router.navigate(`/app/projects/${projectId}`) });
     items.push({ label: 'Work panel', onSelect: () => store.setUi({ panel: store.state.ui.panel === 'open' ? 'closed' : 'open' }) });

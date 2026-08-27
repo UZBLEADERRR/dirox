@@ -195,12 +195,25 @@ test('the GitHub tools stay away from a user who has not connected one', () => {
     'a tool that can only answer "connect your account" costs schema and invites a wasted call');
 });
 
-test('opening a pull request always asks, whatever the trust level', async () => {
+test('anything that changes the user\'s GitHub account asks first', async () => {
+  /*
+     The split is by what a tool does to the account, not by which tool it is.
+     Reading is safe at any trust level; creating a repository, committing a
+     file or opening a pull request all leave our container and appear under
+     the user's name, so all three stop and ask.
+  */
   const { githubTools } = await import('../src/agent/tools/github.js');
-  const open = githubTools.find(tool => tool.name === 'github_open_pull_request');
-  assert.equal(open.risk, 'outward', 'publishing to a shared repository is not a silent action');
 
-  for (const tool of githubTools.filter(t => t.name !== 'github_open_pull_request')) {
-    assert.equal(tool.risk, 'safe', `${tool.name} should be read-only`);
+  const writes = new Set(['github_open_pull_request', 'github_create_repository', 'github_write_file']);
+
+  for (const tool of githubTools) {
+    const expected = writes.has(tool.name) ? 'outward' : 'safe';
+    assert.equal(tool.risk, expected, `${tool.name} should be ${expected}`);
+  }
+
+  // And every write we know about is actually present, so this cannot pass by
+  // the tool having been removed.
+  for (const name of writes) {
+    assert.ok(githubTools.some(tool => tool.name === name), `${name} is missing`);
   }
 });

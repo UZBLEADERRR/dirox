@@ -166,6 +166,57 @@ export async function createPullRequest(token, fullName, { title, head, base, bo
   });
 }
 
+/**
+ * Make a new repository on the user's account.
+ *
+ * The gap this closes was a plain one: "build me a Telegram bot and put it on
+ * GitHub" ended at "I cannot create repositories", because nothing here could.
+ * The agent could read, branch and open pull requests against repositories
+ * that already existed, and go no further.
+ *
+ * `auto_init` is on by default so the repository has a first commit and a
+ * default branch. An empty repository has neither, and pushing to one is a
+ * different and worse first experience.
+ */
+export async function createRepository(token, { name, description = '', isPrivate = true, autoInit = true }) {
+  return githubRequest(token, '/user/repos', {
+    method: 'POST',
+    body: {
+      name,
+      description: String(description || '').slice(0, 350),
+      private: isPrivate !== false,
+      auto_init: autoInit !== false
+    }
+  });
+}
+
+/**
+ * Write a file straight into a repository.
+ *
+ * A commit through the API rather than a clone and a push: for a handful of
+ * files — a bot's source, a README, a workflow — it needs no working copy, no
+ * remote to configure and no credentials on disk.
+ *
+ * The `sha` of the existing file is required by GitHub to replace one, so it
+ * is looked up first. Without that an update reads as a conflict.
+ */
+export async function putFile(token, fullName, path, { content, message, branch }) {
+  const existing = await githubRequest(
+    token,
+    `/repos/${fullName}/contents/${path.split('/').map(encodeURIComponent).join('/')}${branch ? `?ref=${encodeURIComponent(branch)}` : ''}`
+  ).catch(error => (error?.status === 404 ? null : Promise.reject(error)));
+
+  return githubRequest(token, `/repos/${fullName}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+    method: 'PUT',
+    body: {
+      message: message || `Add ${path}`,
+      content: Buffer.from(String(content ?? ''), 'utf8').toString('base64'),
+      ...(branch ? { branch } : {}),
+      ...(existing?.sha ? { sha: existing.sha } : {})
+    }
+  });
+}
+
 export async function getFileContent(token, fullName, path, ref) {
   const data = await githubRequest(token, `/repos/${fullName}/contents/${encodeURIComponent(path)}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`);
   if (data?.encoding === 'base64') return Buffer.from(data.content, 'base64').toString('utf8');
@@ -304,6 +355,44 @@ export async function getIntegration(userId, provider = 'github') {
     .select('id,provider,account_login,account_name,avatar_url,scopes,last_used_at,revoked_at,created_at')
     .eq('user_id', userId).eq('provider', provider).first();
   return row && !row.revoked_at ? row : null;
+}
+
+/**
+ * Run something against GitHub as this user, and believe GitHub about the token.
+ *
+ * A 401 from GitHub is not a transient failure: the token has been revoked in
+ * the user's settings, the OAuth app's secret has been rotated, or it expired.
+ * Leaving the row saying "Connected" while every call comes back "Bad
+ * credentials" is the worst of both — the product looks connected, does
+ * nothing, and reports GitHub's own wording, which tells nobody what to do.
+ *
+ * So the stored token is marked revoked on the spot. The account then reads as
+ * disconnected everywhere at once: the settings panel offers Connect again,
+ * the project picker stops showing an empty repository list, and the agent is
+ * no longer handed GitHub tools that can only fail.
+ *
+ * @param {string} userId
+ * @param {(token:string)=>Promise<any>} fn
+ */
+export async function asGitHubUser(userId, fn, { provider = 'github' } = {}) {
+  const token = await getIntegrationToken(userId, provider);
+  if (!token) {
+    throw badRequest('No GitHub account is connected. Connect one in Settings → Developer.');
+  }
+
+  try {
+    return await fn(token);
+  } catch (error) {
+    if (error?.status === 401) {
+      await revokeIntegration(userId, provider).catch(() => {});
+      logger.warn('github token rejected; marking the connection as needing reauth', { userId });
+      throw badRequest(
+        'GitHub rejected the stored credentials, so the connection has been cleared. '
+        + 'Connect GitHub again — the access was most likely revoked or expired.'
+      );
+    }
+    throw error;
+  }
 }
 
 export async function revokeIntegration(userId, provider = 'github') {
