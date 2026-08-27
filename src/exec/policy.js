@@ -6,14 +6,24 @@
  * and only one of them looks like it.
  *
  * The rules, in order:
- *   1. Shell metacharacters that chain or substitute commands are rejected.
- *   2. The executable must be on the allowlist.
- *   3. Explicitly denied executables are rejected even if allowlisted.
- *   4. Argument-level patterns decide whether approval is required.
+ *   1. Substitution is rejected — `$(…)`, backticks, process substitution —
+ *      because it produces commands that no static check can see.
+ *   2. Composition is allowed: `&&`, `||`, `;`, `|`, redirects. The line is
+ *      split into the commands that will actually run.
+ *   3. Every one of those must be on the allowlist. Every one.
+ *   4. Explicitly denied executables are rejected even if allowlisted.
+ *   5. Redirections must point inside the workspace.
+ *   6. Argument-level patterns decide whether approval is required, and the
+ *      riskiest segment sets the risk for the whole line.
+ *
+ * Refusing composition outright — the previous rule — did not make anything
+ * safer. It made the agent unable to run a build, and pushed the same commands
+ * into `package.json`, where nothing inspects them at all.
  */
 
 import { systemSetting } from '../ai/catalog.js';
 import { RISK } from '../agent/permissions.js';
+import { lex, segment, redirectAllowed, isComposed, findSubstitution } from './shell.js';
 
 const DEFAULT_POLICY = {
   allow: [
@@ -22,8 +32,14 @@ const DEFAULT_POLICY = {
     'go', 'cargo', 'rustc', 'java', 'mvn', 'gradle', 'dotnet', 'php', 'composer',
     'ruby', 'bundle', 'rake',
     'git', 'make', 'jest', 'vitest', 'eslint', 'prettier', 'tsc', 'tsx',
+    // Build tools a project invokes by name. Most arrive through `npm run`,
+    // which resolves them itself, but a direct call should not be a wall.
+    'vite', 'next', 'nuxt', 'webpack', 'rollup', 'esbuild', 'swc', 'turbo',
+    'nx', 'deno', 'uv', 'poetry', 'alembic', 'flask', 'rails', 'expo', 'eas',
     'ls', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'wc', 'echo', 'pwd',
     'mkdir', 'touch', 'cp', 'mv', 'rm', 'sed', 'awk', 'sort', 'uniq', 'diff',
+    'tr', 'cut', 'tee', 'nl', 'tac', 'rev', 'basename', 'dirname', 'realpath',
+    'printf', 'seq', 'date', 'jq', 'yq', 'true', 'false', 'test', 'which',
     // Packaging. Asked to "send me the project as a zip", the agent needs a
     // way to make one; without these it could only describe the idea.
     'zip', 'unzip', 'tar', 'gzip', 'gunzip', 'bzip2', 'xz', 'sha256sum', 'md5sum',
@@ -53,72 +69,130 @@ const DANGEROUS_ARGS = [
   { pattern: /^push$/i, executable: 'git', risk: RISK.OUTWARD, why: 'writes to the remote repository' },
   { pattern: /^(publish|deploy)$/i, executable: null, risk: RISK.OUTWARD, why: 'publishes outside the workspace' },
   { pattern: /^(install|add|ci)$/i, executable: null, risk: RISK.INSTALL, why: 'changes dependencies' },
-  { pattern: /^(migrate|db:migrate|db:drop|db:reset)$/i, executable: null, risk: RISK.DESTRUCTIVE, why: 'changes database state' }
+  { pattern: /^(migrate|db:migrate|db:drop|db:reset)$/i, executable: null, risk: RISK.DESTRUCTIVE, why: 'changes database state' },
+  // `find -exec` runs a command the allowlist never saw, which is the one hole
+  // composition cannot close. It stays available, but it asks first.
+  { pattern: /^-(exec|execdir|delete|ok)$/i, executable: 'find', risk: RISK.DESTRUCTIVE, why: 'runs an unchecked command for every match' }
 ];
+
+/**
+ * Interpreters, and the flags that turn them into "run this text".
+ *
+ * `node -e '…'` is substitution wearing a different hat: the program is
+ * composed at runtime and the allowlist never sees what it will do — which
+ * can include spawning the very executables the allowlist refuses. The same
+ * principle that rejects `$(…)` rejects this, and for the same reason: what
+ * runs has to be visible before it runs.
+ *
+ * The agent is not blocked from scripting. It writes a file and runs the
+ * file, which is visible, reviewable, checkpointed and undoable.
+ */
+const INTERPRETERS = new Set(['node', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'Rscript']);
+const INLINE_PROGRAM_FLAGS = /^(-e|--eval|-c|--command|-p|--print|-r|--require|-E)$/;
 
 /** Paths a command must never be pointed at, even inside the workspace. */
 const PROTECTED_PATHS = [/^\/(?!tmp)/, /^~/, /\.\.\//, /^\.git\/?$/, /node_modules\/\.bin/];
 
 /**
  * @param {string} command
- * @returns {{ok:boolean, executable:string, args:string[], risk:string, reason?:string, why?:string}}
+ * @returns {{ok:boolean, mode?:'direct'|'shell', executable?:string, args?:string[],
+ *            script?:string, risk?:string, reason?:string, why?:string,
+ *            executables?:string[]}}
  */
 export async function evaluateCommand(command) {
   const text = String(command || '').trim();
   if (!text) return { ok: false, reason: 'The command is empty' };
-  if (text.length > 2000) return { ok: false, reason: 'The command is too long' };
+  if (text.length > 4000) return { ok: false, reason: 'The command is too long' };
 
-  if (SHELL_INJECTION.test(text)) {
+  const substitution = findSubstitution(text);
+  if (substitution) {
     return {
       ok: false,
-      reason: 'Command chaining, redirection and substitution are not permitted. Run one command at a time.'
+      reason: `${substitution} is not permitted: it builds a command while running, which cannot be checked beforehand. Write the steps out instead.`
     };
   }
 
-  const parts = tokenize(text);
-  if (!parts.length) return { ok: false, reason: 'The command could not be parsed' };
+  const lexed = lex(text);
+  if (lexed.error) return { ok: false, reason: lexed.error };
 
-  const [executable, ...args] = parts;
-  const base = executable.split('/').pop();
+  const grouped = segment(lexed.tokens);
+  if (grouped.error) return { ok: false, reason: grouped.error };
 
   const policy = await systemSetting('sandbox.policy', DEFAULT_POLICY);
   const allow = new Set(policy.allow || DEFAULT_POLICY.allow);
   const deny = new Set(policy.deny || DEFAULT_POLICY.deny);
   const confirm = new Set(policy.confirm || DEFAULT_POLICY.confirm);
 
-  if (deny.has(base)) {
-    return { ok: false, executable: base, args, reason: `\`${base}\` is not permitted in the sandbox` };
-  }
-  if (!allow.has(base)) {
-    return {
-      ok: false, executable: base, args,
-      reason: `\`${base}\` is not on the allowed command list. An administrator can add it in system settings.`
-    };
-  }
+  let risk = RISK.SAFE;
+  let why = null;
+  const escalate = (candidate, reason) => {
+    if (rankRisk(candidate) > rankRisk(risk)) { risk = candidate; why = reason; }
+  };
 
-  for (const arg of args) {
-    for (const rule of PROTECTED_PATHS) {
-      if (rule.test(arg)) {
-        return { ok: false, executable: base, args, reason: `\`${arg}\` points outside the project workspace` };
+  // Every segment, not only the first: `ls && rm -rf .` is two commands and
+  // the second one is the whole point.
+  for (const part of grouped.segments) {
+    const base = part.executable.split('/').pop();
+
+    if (deny.has(base)) {
+      return { ok: false, executable: base, reason: `\`${base}\` is not permitted in the sandbox` };
+    }
+    if (!allow.has(base)) {
+      return {
+        ok: false, executable: base,
+        reason: `\`${base}\` is not on the allowed command list. An administrator can add it in system settings.`
+      };
+    }
+
+    if (INTERPRETERS.has(base)) {
+      const inline = part.args.find(arg => INLINE_PROGRAM_FLAGS.test(arg));
+      if (inline) {
+        return {
+          ok: false, executable: base,
+          reason: `\`${base} ${inline}\` runs a program supplied as text, which cannot be checked before it runs. Write the script to a file and run the file.`
+        };
+      }
+    }
+
+    for (const arg of part.args) {
+      for (const rule of PROTECTED_PATHS) {
+        if (rule.test(arg)) {
+          return { ok: false, executable: base, reason: `\`${arg}\` points outside the project workspace` };
+        }
+      }
+    }
+
+    for (const target of part.redirects) {
+      if (!redirectAllowed(target)) {
+        return { ok: false, executable: base, reason: `Writing to \`${target}\` is outside the project workspace` };
+      }
+    }
+
+    escalate(/^(ls|cat|head|tail|grep|rg|find|wc|echo|pwd|diff|sort|uniq|sha256sum|md5sum)$/.test(base)
+      ? RISK.SAFE : RISK.WRITE, null);
+
+    if (confirm.has(base)) escalate(RISK.DESTRUCTIVE, `\`${base}\` can destroy work`);
+
+    for (const arg of part.args) {
+      for (const rule of DANGEROUS_ARGS) {
+        if (rule.executable && rule.executable !== base) continue;
+        if (!rule.pattern.test(arg)) continue;
+        escalate(rule.risk, rule.why);
       }
     }
   }
 
-  // Start at the lowest risk that fits, then escalate on argument patterns.
-  let risk = /^(ls|cat|head|tail|grep|rg|find|wc|echo|pwd|diff|sort|uniq)$/.test(base) ? RISK.SAFE : RISK.WRITE;
-  let why = null;
+  const executables = grouped.segments.map(part => part.executable.split('/').pop());
+  const composed = isComposed(lexed.tokens);
 
-  if (confirm.has(base)) { risk = RISK.DESTRUCTIVE; why = `\`${base}\` can destroy work`; }
-
-  for (const arg of args) {
-    for (const rule of DANGEROUS_ARGS) {
-      if (rule.executable && rule.executable !== base) continue;
-      if (!rule.pattern.test(arg)) continue;
-      if (rankRisk(rule.risk) > rankRisk(risk)) { risk = rule.risk; why = rule.why; }
-    }
+  // A single command still runs without a shell at all. That is a stronger
+  // guarantee than a validated one, so it is kept wherever it applies.
+  if (!composed) {
+    const [only] = grouped.segments;
+    return { ok: true, mode: 'direct', executable: only.executable, args: only.args, risk, why, executables };
   }
 
-  return { ok: true, executable: base, args, risk, why };
+  return { ok: true, mode: 'shell', script: text, risk, why, executables };
 }
 
 function rankRisk(risk) {

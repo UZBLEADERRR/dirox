@@ -75,10 +75,27 @@ export async function runCommand(projectId, command, options = {}) {
   let truncated = false;
   let killedByTimeout = false;
 
-  const child = spawn(evaluation.executable, evaluation.args, {
+  /*
+    Two shapes, one guarantee.
+
+    A single command runs with no shell at all — the strongest form, kept
+    wherever it applies. A composed line needs one to join the pieces, so `sh`
+    is spawned with an explicit argv rather than by letting Node build a
+    command string. `shell: false` stays true either way: the difference is
+    which program is being run, never how it is assembled.
+
+    What makes the second form safe is not the absence of a shell but the
+    absence of substitution. Every executable the line will run is visible in
+    the text, and every one of them was checked before we got here.
+  */
+  const [program, argv] = evaluation.mode === 'shell'
+    ? ['/bin/sh', ['-c', evaluation.script]]
+    : [evaluation.executable, evaluation.args];
+
+  const child = spawn(program, argv, {
     cwd,
     env: sandboxEnv(workspace, options.env),
-    shell: false,             // the critical flag: no shell interpretation, ever
+    shell: false,             // never let Node assemble a command string
     detached: true,           // own process group, so a whole tree can be killed
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
@@ -108,7 +125,7 @@ export async function runCommand(projectId, command, options = {}) {
       process.kill(-child.pid, 'SIGTERM');
       setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } }, 3000).unref?.();
     } catch { /* the process already exited */ }
-    logger.debug('sandbox process terminated', { reason, command: evaluation.executable });
+    logger.debug('sandbox process terminated', { reason, command: (evaluation.executables || []).join(' ') });
   }
 
   const timer = setTimeout(() => { killedByTimeout = true; terminate('timeout'); }, timeoutMs);
@@ -131,7 +148,7 @@ export async function runCommand(projectId, command, options = {}) {
   runtimeStats.tool(!ok);
 
   if (killedByTimeout) {
-    logger.warn('sandbox command timed out', { command: evaluation.executable, timeoutMs, projectId });
+    logger.warn('sandbox command timed out', { command: (evaluation.executables || []).join(' '), timeoutMs, projectId });
   }
 
   const output = [stdout, stderr].filter(Boolean).join('\n').trim();
@@ -145,7 +162,11 @@ export async function runCommand(projectId, command, options = {}) {
     truncated,
     timedOut: killedByTimeout,
     durationMs,
-    command: `${evaluation.executable} ${evaluation.args.join(' ')}`.trim(),
+    // Echoed back as the user wrote it, so a composed line reads the way it
+    // was typed rather than as its first fragment.
+    command: evaluation.mode === 'shell'
+      ? evaluation.script
+      : `${evaluation.executable} ${evaluation.args.join(' ')}`.trim(),
     risk: evaluation.risk
   };
 }

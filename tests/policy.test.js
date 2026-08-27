@@ -59,7 +59,7 @@ test('paths outside the workspace are rejected', async () => {
 test('empty and oversized commands are rejected', async () => {
   assert.equal((await evaluateCommand('')).ok, false);
   assert.equal((await evaluateCommand('   ')).ok, false);
-  assert.equal((await evaluateCommand(`npm test ${'x'.repeat(2500)}`)).ok, false);
+  assert.equal((await evaluateCommand(`npm test ${'x'.repeat(5000)}`)).ok, false);
 });
 
 test('tokenize honours quoting without invoking a shell', () => {
