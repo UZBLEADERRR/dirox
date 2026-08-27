@@ -19,7 +19,16 @@ const PHASE_LABEL = {
   validate: 'Validating',
   review: 'Reviewing',
   checkpoint: 'Checkpoint',
+  delegate: 'Delegating',
   finalize: 'Finishing'
+};
+
+/** What each sub-agent is doing, in words a person would use. */
+const ROLE_LABEL = {
+  explore: 'Looking into',
+  implement: 'Building',
+  verify: 'Testing',
+  review: 'Reviewing'
 };
 
 export function createActivity({ onFileClick } = {}) {
@@ -108,6 +117,26 @@ export function createActivity({ onFileClick } = {}) {
           h('div', h('button.file-ref', { onClick: () => onFileClick(file.path) }, file.path),
             file.lines ? h('span.subtle', ` lines ${file.lines}`) : null)));
       }
+    },
+
+    /**
+     * A delegated job.
+     *
+     * Worth its own row rather than folding into the tool list: from the
+     * user's side this is the agent saying "I sent someone to find out", and
+     * the cost of that answer belongs next to it.
+     */
+    delegate({ role, objective, status, steps, changed, costMicros }) {
+      const row = rowFor(`delegate:${role}:${String(objective).slice(0, 60)}`);
+      row.element.dataset.status = status === 'completed' ? 'done' : status === 'failed' ? 'failed' : 'active';
+      mount(row.title, `${ROLE_LABEL[role] || 'Delegated'}: ${truncate(objective, 70)}`);
+      mount(row.detail, status === 'completed'
+        ? [
+          `${steps} step${steps === 1 ? '' : 's'}`,
+          changed ? ` · ${changed} file${changed === 1 ? '' : 's'} changed` : '',
+          costMicros ? ` · ${formatCost(costMicros)}` : ''
+        ].join('')
+        : status === 'failed' ? 'Did not finish' : 'Working…');
     },
 
     notice({ level, message }) {

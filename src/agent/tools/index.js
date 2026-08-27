@@ -18,6 +18,7 @@ import { githubTools, GITHUB_TOOL_NAMES } from './github.js';
 import { deliverTools, uploadTools } from './deliver.js';
 import { supabaseTools, SUPABASE_TOOL_NAMES } from './supabase.js';
 import { loaderTools } from './loader.js';
+import { delegateTools } from './delegate.js';
 import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
@@ -33,7 +34,7 @@ import { logger } from '../../core/logger.js';
 const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
   ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
-  ...loaderTools
+  ...loaderTools, ...delegateTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -80,7 +81,7 @@ const TOOLSETS = {
 export function toolsFor({
   mode = 'agent', toolset, featureFlags = {}, includeGitHub = false,
   hasRepository = false, hasDevCommand = false, hasGitHub = true, hasSupabase = false,
-  loadedGroups = new Set()
+  loadedGroups = new Set(), canDelegate = false
 } = {}) {
   // The intent profile decides first: it can refuse tools outright, which no
   // amount of later filtering can do as cheaply.
@@ -114,6 +115,16 @@ export function toolsFor({
   // first" costs schema on every call and invites a wasted one.
   if (!hasSupabase) {
     tools = tools.filter(tool => !SUPABASE_TOOL_NAMES.has(tool.name));
+  }
+  /*
+     Delegation is offered only to a run that can actually do it.
+
+     A sub-agent's own run cannot spawn one — depth is spent — and a read-only
+     question has no piece of work to hand over. Offering the tool anyway would
+     cost its schema on every call and invite one that can only fail.
+  */
+  if (!canDelegate || featureFlags.sub_agents === false) {
+    tools = tools.filter(tool => tool.name !== 'delegate');
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));

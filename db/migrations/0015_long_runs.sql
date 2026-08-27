@@ -73,3 +73,10 @@ insert into system_settings (key, value, description) values
    '{"enabled":true,"max_children":6,"child_iterations":14}'::jsonb,
    'Sub-agent limits: whether a run may delegate at all, how many children one run may spawn, and how long each may work.')
 on conflict (key) do nothing;
+
+-- One switch for the whole mechanism. A deployment that would rather pay for
+-- one long conversation than several short ones can turn it off without a
+-- deploy, and the tool then never reaches a model.
+insert into feature_flags (key, name, description, enabled, rollout_percentage) values
+  ('sub_agents','Sub-agents','Delegating a scoped piece of work to a child run with its own budget and its own conversation.', true, 100)
+on conflict (key) do nothing;

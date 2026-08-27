@@ -33,12 +33,39 @@ const MODEL = {
   tiers: ['level0', 'level1', 'level2'], user_selectable: true
 };
 
+/**
+ * Is this the pipeline deciding, rather than the agent working?
+ *
+ * Intent, complexity and the planner are all model calls, and if they took
+ * entries off a test's script every assertion about "the second turn" would
+ * depend on whether a heuristic happened to be confident that day.
+ */
+function isRouterCall(request) {
+  return (request.messages ?? []).some(message =>
+    /^(Classify|Produce a short implementation plan)/.test(String(message.content ?? '')));
+}
+
 // Mocks are installed once: a module cannot be mocked twice in one process.
 {
   mock.module(`${SRC}ai/gateway.js`, {
     namedExports: {
       async complete(request) {
         calls.push(request);
+
+        /*
+           The routers and the planner answer for themselves.
+
+           `{}` is a reply all three parsers reject, so each falls back to its
+           own heuristic — which is the code under test in those cases anyway.
+        */
+        if (isRouterCall(request)) {
+          return {
+            text: '{}', toolCalls: [],
+            usage: { inputTokens: 30, outputTokens: 4, cachedInputTokens: 0 },
+            costMicros: 24, finishReason: 'stop', model: MODEL
+          };
+        }
+
         const next = script.length ? script.shift() : null;
         return {
           text: next ? (next.text ?? '') : reply,
@@ -103,6 +130,11 @@ function fresh(answer, turns = []) {
  */
 function callTool(name, args = {}) {
   return { text: '', toolCalls: [{ id: `${name}-${Math.random().toString(36).slice(2, 8)}`, name, arguments: args }] };
+}
+
+/** The model calls that were the agent working, not the pipeline deciding. */
+function turns(all = calls) {
+  return all.filter(call => !isRouterCall(call));
 }
 
 /** Run one objective through the real loop and report what the model saw. */
@@ -238,16 +270,17 @@ test('a question is answered read-only, with a small toolset', async () => {
 test('a long task is no longer cut off at forty steps', async () => {
   // Sixty distinct actions: nothing repeats, nothing stalls, and the budget is
   // ample. The old ceiling stopped this at forty with an apology.
-  const turns = Array.from({ length: 60 }, (_, index) => callTool(`step_${index}`));
-  fresh('Finished the migration.', turns);
+  const scripted = Array.from({ length: 60 }, (_, index) => callTool(`step_${index}`));
+  fresh('Finished the migration.', scripted);
 
   const project = { id: 'project-1', name: 'api', index_status: 'ready' };
   const { result, calls: made } = await run('port the whole data layer to Postgres', {
-    project, max_iterations: 60, budget_micros: 5_000_000
+    project, max_iterations: 61, budget_micros: 5_000_000
   });
 
   assert.equal(result.status, 'completed');
-  assert.equal(made.length, 61, `the run stopped after ${made.length} model calls; it was scripted for 61`);
+  const worked = turns(made);
+  assert.equal(worked.length, 61, `the run stopped after ${worked.length} turns; it was scripted for 61`);
   assert.equal(result.summary, 'Finished the migration.');
 });
 
@@ -260,8 +293,8 @@ test('a run that cycles without learning anything stops itself', async () => {
      nowhere, which is the expensive failure mode a step ceiling used to hide.
   */
   const cycle = Array.from({ length: 12 }, (_, index) => `look_${index}`);
-  const turns = Array.from({ length: 90 }, (_, index) => callTool(cycle[index % 12]));
-  fresh('Done.', turns);
+  const scripted = Array.from({ length: 90 }, (_, index) => callTool(cycle[index % 12]));
+  fresh('Done.', scripted);
 
   const project = { id: 'project-1', name: 'api', index_status: 'ready' };
   const { result, calls: made } = await run('work out why the tests are flaky', {
@@ -270,7 +303,7 @@ test('a run that cycles without learning anything stops itself', async () => {
 
   assert.equal(result.status, 'completed');
   assert.equal(result.stopReason, 'stalled', `the run stopped because: ${result.stopReason}`);
-  assert.ok(made.length < 30, `${made.length} model calls before the stall was noticed`);
+  assert.ok(turns(made).length < 30, `${turns(made).length} turns before the stall was noticed`);
   assert.match(result.summary, /without making progress/);
 });
 
@@ -316,4 +349,109 @@ test('a run picked up mid-flight does not start over', async () => {
   // And the tool group it had already paid to load is still loaded.
   const names = (made.at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
   assert.ok(names.some(name => name.startsWith('github_')), 'the loaded group was dropped on resume');
+});
+
+// ─── sub-agents ─────────────────────────────────────────────────────────────
+
+test('what a sub-agent read stays with the sub-agent', async () => {
+  /*
+     The claim being tested is the only one that justifies delegation at all.
+
+     A child reads, runs and abandons things; all of that lives in its own
+     conversation and is thrown away. The parent receives the conclusion. If
+     the child's tool results leaked back into the parent's history, delegating
+     would cost more than doing the work inline.
+  */
+  fresh('I used the finding and made the change.', [
+    callTool('delegate', { role: 'explore', objective: 'find where authentication lives' }),
+    callTool('probe_the_auth_directory'),        // the child's first step
+    { text: 'Auth lives in src/auth/session.js.', toolCalls: [] }   // the child reports
+  ]);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, calls: made } = await run('rework the session handling', {
+    project, budget_micros: 5_000_000
+  });
+
+  assert.equal(result.status, 'completed');
+
+  const parentFinal = JSON.stringify(turns(made).at(-1).messages);
+  assert.match(parentFinal, /Auth lives in src\/auth\/session\.js/, 'the parent never received the conclusion');
+  assert.ok(!parentFinal.includes('probe_the_auth_directory'),
+    'the child\'s tool traffic leaked into the parent\'s conversation');
+});
+
+test('an explorer is given no way to change anything', async () => {
+  fresh('Done.', [
+    callTool('delegate', { role: 'explore', objective: 'find the rate limiter' }),
+    { text: 'It is in src/core/limit.js.', toolCalls: [] }
+  ]);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('replace the rate limiter', { project, budget_micros: 5_000_000 });
+
+  // Calls: parent, child, parent. The middle one is the sub-agent's.
+  const childTools = (turns(made)[1].tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(childTools.length > 0, 'the sub-agent was sent no tools at all');
+  assert.ok(!childTools.some(name => /write|edit|delete|move|commit|install|execute/.test(name)),
+    `an explorer was handed: ${childTools.join(', ')}`);
+});
+
+test('a sub-agent spends the parent\'s money, and the parent knows', async () => {
+  fresh('Done.', [
+    callTool('delegate', { role: 'explore', objective: 'find the config loader' }),
+    callTool('look_at_config'),
+    { text: 'src/config/env.js.', toolCalls: [] }
+  ]);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, calls: made } = await run('move the config loader', { project, budget_micros: 5_000_000 });
+
+  // Four turns at 24 micros each: two the parent took, two the child did.
+  assert.equal(turns(made).length, 4);
+  assert.equal(result.budget.spentMicros, made.length * 24,
+    'the child\'s spend did not reach the parent\'s budget');
+});
+
+test('delegation is not offered to a run that cannot use it', async () => {
+  fresh('It routes by category and level.');
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('what does the model router do in this project?', { project });
+
+  const names = (made.at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(!names.includes('delegate'), 'a read-only question was handed a way to spawn runs');
+});
+
+test('delegating keeps the parent small, which is the whole point', async () => {
+  /*
+     The same eight lookups, done two ways.
+
+     Inline, each result joins the parent's conversation and is re-sent on
+     every later step. Delegated, they join the child's conversation and are
+     thrown away when it reports. The number below is what that difference is
+     worth on the turn where the parent actually does the work.
+  */
+  const { estimateMessageTokens } = await import(`${SRC}ai/pricing.js`);
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const lookups = Array.from({ length: 8 }, (_, index) => callTool(`inspect_module_${index}`));
+
+  fresh('Auth lives in src/auth/session.js; here is the change.', lookups);
+  const inline = await run('rewrite the session handling across the auth module', {
+    project, max_iterations: 20, budget_micros: 5_000_000
+  });
+  const inlineFinal = estimateMessageTokens(turns(inline.calls).at(-1).messages);
+
+  fresh('Auth lives in src/auth/session.js; here is the change.', [
+    callTool('delegate', { role: 'explore', objective: 'find every module that touches sessions' }),
+    ...lookups,
+    { text: 'Sessions are handled in src/auth/session.js and read in eight modules.', toolCalls: [] }
+  ]);
+  const delegated = await run('rewrite the session handling across the auth module', {
+    project, max_iterations: 20, budget_micros: 5_000_000
+  });
+  const delegatedFinal = estimateMessageTokens(turns(delegated.calls).at(-1).messages);
+
+  assert.ok(delegatedFinal < inlineFinal * 0.6,
+    `the parent's closing turn cost ${delegatedFinal} tokens delegated against ${inlineFinal} inline — delegation is not paying for itself`);
 });

@@ -523,6 +523,7 @@ export async function render({ params, query = {} }) {
           case 'context': activity.context(data); break;
           case 'model': activity.model(data); break;
           case 'notice': activity.notice(data); break;
+          case 'delegate': activity.delegate(data); break;
           case 'deliverable':
             // Shown the moment it exists rather than only in the summary: a
             // long run should hand over the file as soon as it is ready.

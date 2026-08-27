@@ -99,6 +99,9 @@ export function packRunState(state, extra = {}) {
     loadedGroups: [...(state.loadedGroups ?? [])],
     changedFiles: [...(state.changedFiles?.values() ?? [])].slice(0, 400),
     deliverables: (state.deliverables ?? []).slice(0, 50),
+    // Delegated jobs count against a per-task limit, so a resumed run that
+    // forgot them could split the same work indefinitely.
+    children: (state.children ?? []).slice(0, 20),
     recentActions: (state.recentActions ?? []).slice(-12),
     // Calls that never ran: the one that stopped for approval, and everything
     // queued behind it. Resuming means running these before asking the model
@@ -148,6 +151,7 @@ export function unpackRunState(stored) {
     changedFiles: (Array.isArray(stored.changedFiles) ? stored.changedFiles : [])
       .filter(file => file && typeof file.path === 'string'),
     deliverables: Array.isArray(stored.deliverables) ? stored.deliverables : [],
+    children: Array.isArray(stored.children) ? stored.children : [],
     recentActions: Array.isArray(stored.recentActions) ? stored.recentActions : [],
     pendingCalls: pendingCalls.filter(call => call && typeof call.name === 'string'),
     conversation: conversation.filter(message => message && typeof message.role === 'string'),

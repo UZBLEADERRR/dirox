@@ -25,6 +25,7 @@ import { plannerPrompt } from './prompts.js';
 import { toolsFor, toolDefinitions, executeTool, availableGroups } from './tools/index.js';
 import { groupsFor } from './tools/groups.js';
 import { packRunState, unpackRunState, trimConversation } from './runstate.js';
+import { runSubAgent } from './subagent.js';
 import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
@@ -120,7 +121,7 @@ export async function runTask(task, options) {
     /** Iterations since anything new happened. */
     sinceProgress: 0,
     /** Delegated runs this task has spawned. */
-    children: [],
+    children: resumed?.children ?? [],
     startedAt: Date.now()
   };
 
@@ -441,6 +442,8 @@ export async function runTask(task, options) {
        a task that says "open a pull request" will need GitHub on its first
        step, and making it ask would waste a call in both directions.
     */
+    const delegationDepth = Math.max(0, Number(defaults.delegation_depth ?? 2));
+
     const toolOptions = {
       mode: task.mode,
       toolset: intent.profile.toolset,
@@ -449,10 +452,14 @@ export async function runTask(task, options) {
       hasDevCommand: Boolean(project?.dev_command),
       hasGitHub: options.hasGitHub !== false,
       hasSupabase: options.hasSupabase === true,
-      includeGitHub: intent.profile.github === true
+      includeGitHub: intent.profile.github === true,
+      // Depth is spent by delegating: a top-level run has all of it, a
+      // sub-agent's run has one less, and at zero the tool is not offered.
+      canDelegate: delegationDepth > 0
     };
 
     const groupsAvailable = availableGroups(toolOptions);
+
     for (const group of groupsFor(task.objective)) {
       if (groupsAvailable.has(group)) state.loadedGroups.add(group);
     }
@@ -568,6 +575,41 @@ export async function runTask(task, options) {
           loadedGroups: state.loadedGroups,
           availableGroups: groupsAvailable,
           loadGroup: group => { state.loadedGroups.add(group); state.toolsDirty = true; },
+          /*
+             Delegation.
+
+             The child gets its own conversation, its own slice of the budget
+             and its own row; the parent gets a paragraph. What it does not get
+             is a separate view of the work: file changes, deliverables and
+             spend all roll up here, so a delegated change is still covered by
+             the restore point, the summary and the post-run snapshot.
+          */
+          childCount: () => state.children.length,
+          delegate: async delegation => {
+            const outcome = await runSubAgent(delegation, {
+              task, project, auth, budget, signal, emit,
+              depth: 0,
+              delegationDepth,
+              share: Number(defaults.delegation_budget_share ?? 0.35),
+              options,
+              classification,
+              toolOptions,
+              loadedGroups: state.loadedGroups,
+              availableGroups: groupsAvailable,
+              recordFileChange,
+              beforeFileChange,
+              onDeliverable: file => {
+                state.deliverables.push(file);
+                emit('deliverable', file);
+              }
+            });
+            state.children.push({
+              role: delegation.role,
+              objective: delegation.objective,
+              ...outcome.metadata
+            });
+            return outcome;
+          },
           // A file the user can save is worth its own event: the chat shows it
           // as soon as it exists rather than only in the closing summary.
           onDeliverable: file => {
