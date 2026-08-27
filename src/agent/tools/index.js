@@ -25,6 +25,7 @@ import { parse, toJsonSchema } from '../../core/validate.js';
 import { AppError, badRequest, forbidden, notFound, timedOut, toAppError } from '../../core/errors.js';
 import { decide, describeApproval, RISK } from '../permissions.js';
 import { truncateToolOutput } from '../../context/engine.js';
+import { compressResult } from '../compress.js';
 import { serviceClient, hasServiceRole } from '../../db/supabase.js';
 import { runtimeStats } from '../../modules/observability/audit.js';
 import { logger } from '../../core/logger.js';
@@ -234,10 +235,25 @@ export async function executeTool(call, ctx) {
     const result = await tool.run(args, { ...ctx, signal: controller.signal });
     const durationMs = Date.now() - started;
 
-    const output = truncateToolOutput(result.output ?? '', ctx.toolOutputLimit ?? 6000);
     const ok = result.ok !== false;
+
+    /*
+       Compressed before the model sees it, not only in the history afterwards.
+
+       Most of a tool result is not information: `npm install` prints a
+       thousand lines to say it worked. The model pays for that on arrival and
+       again on every call while it sits in the conversation.
+
+       A failure is compressed differently — there the detail *is* the
+       information, so the errors survive whole and only the parts that were
+       already working are dropped.
+    */
+    const compressed = compressResult(tool.name, result, { limit: ctx.toolOutputLimit ?? 6000 });
+    const output = truncateToolOutput(compressed.output, ctx.toolOutputLimit ?? 6000);
     runtimeStats.tool(!ok);
 
+    // The record keeps what the model was shown, which is what a person
+    // reading the timeline needs to understand what it decided from.
     await recordCall(ctx, call, args, ok ? 'completed' : 'failed', { output, metadata: result.metadata }, durationMs);
 
     return {
