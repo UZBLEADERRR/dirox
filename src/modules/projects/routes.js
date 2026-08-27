@@ -22,6 +22,7 @@ import {
   listWorkspace, readWorkspaceFile, writeWorkspaceFile,
   workspaceExists, isSecretPath
 } from '../../exec/workspace.js';
+import { materialiseWorkspace } from '../../exec/persistence.js';
 
 const PROJECT_COLUMNS = '*,repositories(id,provider,full_name,owner,name,html_url,default_branch,visibility,last_synced_at,sync_error)';
 
@@ -141,7 +142,9 @@ export function projectRoutes() {
         .eq('project_id', project.id).order('created_at').limit(8).all(),
       ctx.auth.db.from('checkpoints').select('id,label,kind,created_at,files')
         .eq('project_id', project.id).order('created_at').limit(5).all(),
-      workspaceExists(project.id)
+      // A container newer than the project has an empty workspace; rebuild it
+      // before reporting whether the project has any files.
+      materialiseWorkspace(project.id).then(() => workspaceExists(project.id)).catch(() => false)
     ]);
 
     return sendJson(ctx.res, 200, {
@@ -260,6 +263,9 @@ export function projectRoutes() {
     const path = String(ctx.query.path || '');
     if (!path) throw badRequest('A file path is required');
     if (isSecretPath(path)) throw badRequest('This file may contain credentials and cannot be opened here');
+
+    // The workspace may belong to an older container than this request does.
+    await materialiseWorkspace(project.id).catch(() => {});
 
     const file = await readWorkspaceFile(project.id, path);
     return sendJson(ctx.res, 200, { file });

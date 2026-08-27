@@ -16,6 +16,28 @@ import { logger } from '../core/logger.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Mirror a change into durable storage.
+ *
+ * Imported lazily rather than at the top: persistence needs the primitives in
+ * this file, and a static import in both directions is a cycle waiting to
+ * surprise someone. The import is cached after the first call, so this costs
+ * one resolution per process.
+ *
+ * Durability is best effort at this layer. A storage outage must not fail the
+ * edit the user asked for — it costs durability for one file, which the next
+ * write of that file repairs.
+ */
+async function mirror(action, projectId, ...args) {
+  if (!projectId) return;
+  try {
+    const persistence = await import('./persistence.js');
+    await persistence[action](projectId, ...args);
+  } catch (error) {
+    logger.debug('workspace mirror skipped', { action, reason: error?.message });
+  }
+}
+
 /** Directories never walked, indexed or shown in the file tree. */
 export const IGNORED_DIRECTORIES = new Set([
   '.git', 'node_modules', '.next', '.nuxt', 'dist', 'build', 'out', 'target',
@@ -24,8 +46,19 @@ export const IGNORED_DIRECTORIES = new Set([
   'bower_components', '.parcel-cache', '.svelte-kit', '.output', 'tmp', '.tmp'
 ]);
 
-/** Files whose contents must never be read into a model prompt. */
-export const SECRET_FILE_PATTERN = /(^|\/)(\.env(\.[\w-]+)?|\.npmrc|\.netrc|id_rsa|id_ed25519|.*\.pem|.*\.key|.*\.p12|.*\.pfx|credentials(\.json)?|service-account.*\.json)$/i;
+/**
+ * Files whose contents must never be read into a model prompt.
+ *
+ * `.env.example` and its variants are deliberately exempt: they are templates
+ * with the values stripped, they are committed to version control, and a
+ * project that cannot read its own env template is a project the agent cannot
+ * set up.
+ */
+const SECRET_EXEMPT = /\.env\.(example|sample|template|dist|defaults?)$/i;
+
+const SECRET_FILE_PATTERN_RAW = /(^|\/)(\.env(\.[\w-]+)?|\.npmrc|\.netrc|id_rsa|id_ed25519|.*\.pem|.*\.key|.*\.p12|.*\.pfx|credentials(\.json)?|service-account.*\.json)$/i;
+
+export const SECRET_FILE_PATTERN = SECRET_FILE_PATTERN_RAW;
 
 const TEXT_EXTENSIONS = new Set([
   '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.vue', '.svelte',
@@ -46,7 +79,11 @@ export function isTextFile(path) {
   return /^(Dockerfile|Makefile|Procfile|Rakefile|Gemfile|Jenkinsfile|LICENSE|README|CHANGELOG|\.?[a-z]+rc)$/i.test(base);
 }
 
-export function isSecretPath(path) { return SECRET_FILE_PATTERN.test(path); }
+export function isSecretPath(path) {
+  const value = String(path ?? '');
+  if (SECRET_EXEMPT.test(value)) return false;
+  return SECRET_FILE_PATTERN_RAW.test(value);
+}
 
 export function workspaceRoot() { return resolve(config.sandbox.workspaceRoot); }
 
@@ -138,6 +175,7 @@ export async function writeWorkspaceFile(projectId, path, content, { createDirec
 
   const previous = await readFile(full, 'utf8').catch(() => null);
   await writeFile(full, text, 'utf8');
+  await mirror('persistFile', projectId, path, text);
 
   return {
     path: String(path).replace(/^[/\\]+/, ''),
@@ -154,6 +192,8 @@ export async function deleteWorkspacePath(projectId, path) {
   const info = await stat(full).catch(() => null);
   if (!info) throw notFound(`Nothing to delete at ${path}`);
   await rm(full, { recursive: info.isDirectory(), force: false });
+  // A directory delete removes many keys; the prefix is what identifies them.
+  await mirror(info.isDirectory() ? 'forgetTree' : 'forgetFile', projectId, path);
   return { path, wasDirectory: info.isDirectory() };
 }
 
@@ -162,6 +202,13 @@ export async function moveWorkspacePath(projectId, from, to) {
   const target = await resolveInside(projectId, to);
   await mkdir(dirname(target), { recursive: true });
   await rename(source, target);
+
+  const moved = await readFile(target, 'utf8').catch(() => null);
+  if (moved !== null) {
+    await mirror('persistFile', projectId, to, moved);
+    await mirror('forgetFile', projectId, from);
+  }
+
   return { from, to };
 }
 

@@ -15,6 +15,7 @@ import { AppError, badRequest, notFound, payloadTooLarge, upstreamFailed } from 
 import { logger } from '../../core/logger.js';
 import { enqueue, QUEUES } from '../../queue/queue.js';
 import { ensureWorkspace, workspacePath, removeWorkspace, workspaceSize } from '../../exec/workspace.js';
+import { snapshotWorkspace, forgetProject, invalidate } from '../../exec/persistence.js';
 import { indexProject } from '../../context/indexer.js';
 import { downloadTarball, repositoryToken, storeRepositoryToken } from './github.js';
 import { registerHandler } from '../../queue/worker.js';
@@ -157,6 +158,11 @@ registerHandler('project.import', async ({ projectId, repositoryId, ref, userId 
 
     const summary = await indexProject(projectId, { full: true });
 
+    // A clone can be repeated from the remote, but only while the remote is
+    // reachable and the token is valid. Snapshotting now means the project
+    // survives both being false later.
+    await snapshotWorkspace(projectId).catch(() => {});
+
     await notify({
       userId, kind: 'system', severity: 'success',
       title: 'Project ready',
@@ -189,6 +195,8 @@ registerHandler('project.index', async ({ projectId, full = false }) => {
 
 registerHandler('project.delete', async ({ projectId }) => {
   await removeWorkspace(projectId);
+  await forgetProject(projectId).catch(() => {});
+  invalidate(projectId);
   return { removed: true };
 });
 

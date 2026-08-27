@@ -25,8 +25,11 @@ test('a credential file is never a deliverable', () => {
   }
 });
 
-test('ordinary build output is deliverable', () => {
-  for (const path of ['dist/app.zip', 'build/app-release.apk', 'report.pdf', 'out/bundle.tar.gz']) {
+test('ordinary build output — and an env template — is deliverable', () => {
+  // `.env.example` has the values stripped and is committed to version
+  // control; treating it as a secret means the agent cannot set a project up.
+  for (const path of ['dist/app.zip', 'build/app-release.apk', 'report.pdf', 'out/bundle.tar.gz',
+                      '.env.example', '.env.template']) {
     assert.equal(isSecretPath(path), false, path);
   }
 });

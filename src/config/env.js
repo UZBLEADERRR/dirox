@@ -102,7 +102,13 @@ export function configReport() {
   const warnings = [];
   if (!caps.database) warnings.push('SUPABASE_URL / SUPABASE_ANON_KEY missing — auth and persistence are disabled.');
   if (!caps.migrations) warnings.push('DATABASE_URL missing — the schema must be applied manually. Set it to have the server keep the schema current.');
-  if (!caps.systemWrites) warnings.push('SUPABASE_SERVICE_ROLE_KEY missing — admin and system writes are disabled.');
+  if (!caps.systemWrites) {
+    warnings.push('SUPABASE_SERVICE_ROLE_KEY missing — admin and system writes are disabled.');
+    // Worth saying separately, because the consequence is not a missing
+    // feature but silent data loss: without durable storage a project that
+    // was never pushed to GitHub exists only until the next deploy.
+    warnings.push('Durable file storage is unavailable — work in a project with no GitHub remote will not survive a restart.');
+  }
   if (!caps.encryption) warnings.push('DIROX_ENCRYPTION_KEY missing — provider keys cannot be stored encrypted.');
   if (!caps.github) warnings.push('GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing — GitHub integration is disabled.');
   if (!caps.billing) warnings.push('STRIPE_SECRET_KEY missing — billing runs in read-only plan mode.');

@@ -15,6 +15,7 @@ import { registerHandler } from '../../queue/worker.js';
 import { enqueue, QUEUES } from '../../queue/queue.js';
 import { allFeatureFlags } from '../../ai/catalog.js';
 import { getIntegration } from '../projects/github.js';
+import { materialiseWorkspace, snapshotWorkspace } from '../../exec/persistence.js';
 import { config } from '../../config/env.js';
 import { invalidatePlanUsage } from '../billing/usage.js';
 
@@ -92,7 +93,11 @@ export async function startTask(task, { project, auth, trust, allowedTiers, pref
   // to try. So the GitHub tools are offered only to a user who has connected.
   const [featureFlags, hasGitHub] = await Promise.all([
     allFeatureFlags(auth.org.id).catch(() => ({})),
-    githubConnected(auth.user.id)
+    githubConnected(auth.user.id),
+    // The container may be newer than the project. Rebuild the workspace from
+    // durable storage before the first tool call rather than letting the agent
+    // discover an empty directory and conclude the project is empty.
+    project ? materialiseWorkspace(project.id).catch(() => null) : null
   ]);
 
   const promise = runTask(task, {
@@ -111,7 +116,16 @@ export async function startTask(task, { project, auth, trust, allowedTiers, pref
       emit('error', { message: error?.message || 'The task failed unexpectedly' });
       return { status: 'failed', summary: error?.message };
     })
-    .finally(() => {
+    .finally(async () => {
+      // Everything the terminal wrote — a generated file, an npm init, a build
+      // that produced source — is only on local disk until now. Tool writes
+      // mirror themselves; a subprocess cannot, so the run sweeps up after
+      // itself once, at the end, rather than on every command.
+      if (project) {
+        await snapshotWorkspace(project.id).catch(error =>
+          logger.warn('post-run snapshot failed', { projectId: project.id, reason: error?.message }));
+      }
+
       // Keep the buffer around briefly so a late subscriber still sees the end.
       setTimeout(() => active.delete(task.id), 30_000).unref?.();
       invalidatePlanUsage(auth.org.id);
