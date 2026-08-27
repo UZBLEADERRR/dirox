@@ -594,3 +594,30 @@ test('a task with no plan is not offered a way to report against one', async () 
   const names = (turns(made).at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
   assert.ok(!names.includes('update_plan'));
 });
+
+test('a coding task is told which skills exist, and a greeting is not', async () => {
+  /*
+     The index sits in the system prefix, which is the cached part — so it is
+     paid for about once per run rather than on every step. Putting the craft
+     itself in the prompt would cost thousands of tokens on every message,
+     including "salom", which is the whole reason skills are documents.
+  */
+  fresh('Done.');
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('add a settings page with a dark theme toggle', {
+    project, budget_micros: 5_000_000
+  });
+
+  const system = turns(made).at(-1).messages.filter(message => message.role === 'system').map(m => m.content).join('\n');
+  assert.match(system, /## Skills/);
+  assert.match(system, /- design: writing or changing any UI/);
+
+  const names = (turns(made).at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(names.includes('load_skill'), 'the index was sent without the tool that acts on it');
+
+  fresh('Salom!');
+  const greeting = await run('Salom');
+  const greetingSystem = turns(greeting.calls).at(-1).messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+  assert.ok(!greetingSystem.includes('Skills'), 'a greeting was told about skills');
+});

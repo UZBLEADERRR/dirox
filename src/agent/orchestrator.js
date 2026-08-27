@@ -28,6 +28,7 @@ import { packRunState, unpackRunState, trimConversation } from './runstate.js';
 import { runSubAgent } from './subagent.js';
 import { planBatch } from './parallel.js';
 import { orientation } from './orientation.js';
+import { availableSkills, skillIndex } from './skills.js';
 import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
@@ -396,6 +397,19 @@ export async function runTask(task, options) {
       ? await orientation(project.id).catch(() => null)
       : null;
 
+    /*
+       The skills index.
+
+       One line per skill, inside the cached system prefix, so it is paid for
+       once per run rather than on every step. A project's own skills are
+       included and win by name — a house style beats a general one, and a team
+       that disagrees with ours should be able to say so in a file.
+    */
+    const skills = intent.intent === 'code'
+      ? await availableSkills(project?.id).catch(() => [])
+      : [];
+    const skillsIndex = skillIndex(skills);
+
     if (brief) {
       emit('step', {
         index: ++state.stepIndex, phase: PHASES.RETRIEVE,
@@ -578,7 +592,8 @@ export async function runTask(task, options) {
       // Depth is spent by delegating: a top-level run has all of it, a
       // sub-agent's run has one less, and at zero the tool is not offered.
       canDelegate: delegationDepth > 0,
-      hasPlan: Boolean(plan?.steps?.length)
+      hasPlan: Boolean(plan?.steps?.length),
+      hasSkills: skills.length > 0
     };
 
     const groupsAvailable = availableGroups(toolOptions);
@@ -687,6 +702,7 @@ export async function runTask(task, options) {
         delegate: async delegation => {
           const outcome = await runSubAgent(delegation, {
             task, project, auth, budget, signal, emit,
+            skillIndex: skillsIndex,
             depth: 0,
             delegationDepth,
             share: Number(defaults.delegation_budget_share ?? 0.35),
@@ -862,6 +878,7 @@ export async function runTask(task, options) {
           project,
           budget,
           profile: intent.profile,
+          skillIndex: skillsIndex,
           availableTools: tools
         });
 

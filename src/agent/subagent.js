@@ -259,6 +259,9 @@ export async function runSubAgent(request, parent) {
         history: conversation,
         project: parent.project,
         budget,
+        // A child doing UI work wants the design skill as much as the parent
+        // does; without the index it holds a tool it can only call by guessing.
+        skillIndex: parent.skillIndex || '',
         availableTools: tools
       });
 

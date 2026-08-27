@@ -22,6 +22,7 @@ import { delegateTools } from './delegate.js';
 import { planTools, PLAN_TOOL_NAMES } from './plan.js';
 import { webTools, WEB_TOOL_NAMES } from './web.js';
 import { screenshotTools } from './screenshot.js';
+import { skillTools, SKILL_TOOL_NAMES } from './skill.js';
 import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
@@ -37,7 +38,7 @@ import { logger } from '../../core/logger.js';
 const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
   ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
-  ...loaderTools, ...delegateTools, ...planTools, ...webTools, ...screenshotTools
+  ...loaderTools, ...delegateTools, ...planTools, ...webTools, ...screenshotTools, ...skillTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -84,7 +85,7 @@ const TOOLSETS = {
 export function toolsFor({
   mode = 'agent', toolset, featureFlags = {}, includeGitHub = false,
   hasRepository = false, hasDevCommand = false, hasGitHub = true, hasSupabase = false,
-  loadedGroups = new Set(), canDelegate = false, hasPlan = false
+  loadedGroups = new Set(), canDelegate = false, hasPlan = false, hasSkills = false
 } = {}) {
   // The intent profile decides first: it can refuse tools outright, which no
   // amount of later filtering can do as cheaply.
@@ -136,6 +137,11 @@ export function toolsFor({
   }
   if (featureFlags.web_access === false) {
     tools = tools.filter(tool => !WEB_TOOL_NAMES.has(tool.name));
+  }
+  // Without an index in front of it, `load_skill` is a tool the model can only
+  // call by guessing a name.
+  if (!hasSkills) {
+    tools = tools.filter(tool => !SKILL_TOOL_NAMES.has(tool.name));
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));

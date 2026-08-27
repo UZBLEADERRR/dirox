@@ -121,7 +121,7 @@ const COMPACT_POLICY = [
   '- Be concise and technical. Cite file paths so a human can verify you.'
 ].join('\n');
 
-export function systemPrompt({ tier = 'full', mode = 'agent', project, projectRules = [], userPreferences = [], toolNames = [] } = {}) {
+export function systemPrompt({ tier = 'full', mode = 'agent', project, projectRules = [], userPreferences = [], toolNames = [], skills = '' } = {}) {
   if (tier === 'minimal') return MINIMAL_POLICY;
 
   if (tier === 'compact') {
@@ -141,6 +141,17 @@ export function systemPrompt({ tier = 'full', mode = 'agent', project, projectRu
   }
 
   const sections = [BASE_POLICY, MODE_POLICY[mode] || MODE_POLICY.agent];
+
+  /*
+     The skills index.
+
+     One line each, and it sits inside the cached prefix — so it is paid for
+     once per run rather than on every step, and the body of a skill is only
+     fetched when the work calls for it. The alternative is putting the craft
+     itself in the prompt, which would be thousands of tokens on every message
+     including "salom".
+  */
+  if (skills) sections.push(`## Skills\n${skills}`);
 
   if (project) {
     const facts = [

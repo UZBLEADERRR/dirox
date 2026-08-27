@@ -91,7 +91,8 @@ export async function assembleContext(request) {
     project,
     projectRules: projectRules.slice(0, tier === 'compact' ? 5 : 12),
     userPreferences: userPreferences.slice(0, tier === 'compact' ? 0 : 6),
-    toolNames: availableTools.map(tool => tool.name)
+    toolNames: availableTools.map(tool => tool.name),
+    skills: request.skillIndex || ''
   });
 
   // The cache boundary. Everything up to and including this message repeats
