@@ -14,7 +14,7 @@ import { h, icon, mount, qs } from '../lib/dom.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { router } from '../lib/router.js';
-import { renderInShell, setPanel, clearPanel, refreshConversations } from '../components/shell.js';
+import { renderInShell, setPanel, clearPanel, refreshConversations, setHeaderMenu, clearHeaderMenu } from '../components/shell.js';
 import { registerCommands, clearCommands } from '../components/palette.js';
 import { createComposer } from '../components/composer.js';
 import { createActivity } from '../components/activity.js';
@@ -280,6 +280,30 @@ export async function render({ params, query = {} }) {
   const thread = h('div.chat__inner');
   scroll.appendChild(thread);
 
+  /*
+     A way back down.
+
+     Once the chat stops dragging you to the bottom, a long run can move a long
+     way while you are reading something above it. The button says so, and one
+     tap returns — otherwise "it stopped following me" is a bug report rather
+     than a feature.
+  */
+  const jumpButton = h('button.chat__jump', {
+    type: 'button', hidden: true, 'aria-label': 'Jump to the latest',
+    onClick: () => scrollToEnd({ force: true })
+  }, icon('chevronDown', { size: 16 }));
+
+  /*
+     Sticky rather than absolutely positioned.
+
+     The composer's height changes with what is typed into it, so anything
+     anchored a fixed distance above it is wrong as soon as the box grows. A
+     sticky child of the scroller floats at the bottom of the visible area
+     without knowing anything about its neighbours, and the negative margin
+     means it takes up no room in the flow.
+  */
+  scroll.appendChild(jumpButton);
+
   const view = h('div.chat', scroll);
 
   renderInShell(view, { title: 'Chat', fill: true });
@@ -369,7 +393,7 @@ export async function render({ params, query = {} }) {
           ? (project.indexStatus === 'ready'
               ? `${project.fileCount} files indexed. Describe what you want built, fixed or explained.`
               : 'This project is still being indexed — ask away, and retrieval will improve once it finishes.')
-          : 'Ask anything. Choose a project below when you want DiroxCode to read or change real code.'),
+          : 'Ask anything. Pick a project from the menu at the top right when you want DiroxCode to read or change real code.'),
       h('div.chat__suggestions', suggestions.map(suggestion => h('button.btn.btn--sm', {
         onClick: () => {
           if (suggestion === 'Connect a project') return router.navigate('/app/projects');
@@ -396,6 +420,52 @@ export async function render({ params, query = {} }) {
   });
   view.appendChild(composer.element);
 
+  /*
+     What the header's menu holds for a chat.
+
+     The project is the whole reason this menu exists: it is chosen once for a
+     conversation and never touched again, and it was taking a quarter of the
+     composer bar on a phone. Everything else here is in the same category —
+     occasionally useful, never per-message.
+
+     `composer.setProject` stays the one place the choice is recorded, so the
+     menu drives the same select rather than keeping a second copy of it.
+  */
+  function fillMenu() {
+    const items = [];
+
+    if (!params.id) {
+      const select = h('select.select', {
+        'aria-label': 'Project',
+        onChange: event => {
+          const chosen = event.target.value || null;
+          projectId = chosen;
+          composer.setProject(chosen);
+        }
+      },
+      h('option', { value: '' }, 'No project'),
+      (store.state.projects || []).map(entry => h('option', { value: entry.id }, entry.name)));
+      select.value = projectId || '';
+
+      items.push({
+        label: 'Project',
+        control: select,
+        hint: 'Which repository DiroxCode reads and changes in this chat.'
+      });
+    }
+
+    items.push({ label: 'New chat', onSelect: () => router.navigate(projectId ? `/app/projects/${projectId}/chat` : '/app') });
+    if (projectId) items.push({ label: 'Project settings', onSelect: () => router.navigate(`/app/projects/${projectId}`) });
+    items.push({ label: 'Work panel', onSelect: () => store.setUi({ panel: store.state.ui.panel === 'open' ? 'closed' : 'open' }) });
+    items.push({ label: 'Automations', onSelect: () => router.navigate('/app/settings/automation') });
+
+    setHeaderMenu(items);
+  }
+
+  fillMenu();
+  // The list arrives after the first paint on a cold load.
+  store.subscribe(state => state.projects, fillMenu);
+
   registerCommands('workspace', [
     ...(projectId ? [
       { id: 'files', group: 'Chat', label: 'Show project files', icon: 'file', run: () => openTreePanel(projectId) },
@@ -408,8 +478,42 @@ export async function render({ params, query = {} }) {
 
   let lastChangedFiles = [];
 
-  function scrollToEnd() {
-    requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
+  /*
+     Following, unless you have gone to look at something.
+
+     Every event scrolled to the bottom unconditionally, which meant that
+     reading back over what the agent had written while it was still writing
+     was impossible: the next token yanked you down again. This is the oldest
+     bug in every chat interface and it makes a long run unreadable.
+
+     So it follows only while you are already at the bottom. Scroll up and it
+     lets go; scroll back down and it picks the thread up again — no button to
+     press, no mode to be in.
+
+     The threshold is generous on purpose. Momentum scrolling, a rubber-band
+     bounce and a keyboard opening all land a few pixels off the true bottom,
+     and treating those as "the user scrolled away" would break following for
+     people who never touched anything.
+  */
+  const FOLLOW_THRESHOLD = 120;
+  let following = true;
+
+  function atBottom() {
+    return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= FOLLOW_THRESHOLD;
+  }
+
+  scroll.addEventListener('scroll', () => {
+    following = atBottom();
+    jumpButton.hidden = following;
+  }, { passive: true });
+
+  function scrollToEnd({ force = false } = {}) {
+    if (!force && !following) return;
+    requestAnimationFrame(() => {
+      scroll.scrollTop = scroll.scrollHeight;
+      following = true;
+      jumpButton.hidden = true;
+    });
   }
 
   async function stopCurrent() {
@@ -462,7 +566,7 @@ export async function render({ params, query = {} }) {
     }
 
     thread.appendChild(userMessage(text));
-    scrollToEnd();
+    scrollToEnd({ force: true });
 
     const activity = createActivity({ onFileClick });
     const bubble = assistantMessage({ activityElement: activity.element, onFileClick });
@@ -470,7 +574,7 @@ export async function render({ params, query = {} }) {
     const deliveredIds = new Set();
     bubble.element.insertBefore(files, bubble.foot);
     thread.appendChild(bubble.element);
-    scrollToEnd();
+    scrollToEnd({ force: true });
 
     composer.setRunning(true);
 
@@ -597,7 +701,7 @@ export async function render({ params, query = {} }) {
               onDecide: approved => decide(approved, data.toolCallId)
             }));
           }
-          scrollToEnd();
+          scrollToEnd({ force: true });
           break;
         case 'done':
           finalText = data.summary || '';
@@ -666,7 +770,7 @@ export async function render({ params, query = {} }) {
   }
 
   composer.focus();
-  scrollToEnd();
+  scrollToEnd({ force: true });
 
-  return () => { closeStream(); clearCommands('workspace'); };
+  return () => { closeStream(); clearCommands('workspace'); clearHeaderMenu(); };
 }

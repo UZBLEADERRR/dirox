@@ -20,6 +20,8 @@ const aiPreferences = t.object({
   autonomy: t.enum(['safe', 'confirm', 'autonomous']),
   verbosity: t.enum(['concise', 'balanced', 'detailed']),
   autoTest: t.boolean(),
+  // Whether a substantial change stops to show its plan first.
+  confirmPlan: t.boolean(),
   autoCommit: t.boolean(),
   autoReview: t.boolean(),
   budgetMicros: t.integer({ min: 1000, max: 50_000_000 }),

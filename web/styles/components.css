@@ -583,3 +583,79 @@ kbd {
   .schedule { grid-template-columns: 1fr; }
   .schedule__actions { justify-content: flex-start; }
 }
+
+/* ─── a page's own toolbar ──────────────────────────────────────────────────
+   Search first, its primary action beside it, and both above the reference
+   prose. A search field below a paragraph of explanation is a search field
+   nobody finds — on the models page it sat 436px down, which on a phone is a
+   whole screen of scrolling before the one control people came for. */
+.toolbar {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  margin-bottom: var(--s-3);
+}
+.toolbar > .input { flex: 1; min-width: 0; }
+.toolbar__action { flex: none; white-space: nowrap; }
+
+@media (max-width: 520px) {
+  /* The label is the first thing to go; the icon still says "add". */
+  .toolbar__action { font-size: 0; padding-left: var(--s-3); padding-right: var(--s-3); }
+  .toolbar__action svg { font-size: var(--fs-sm); }
+}
+
+/* ─── the header's overflow menu ────────────────────────────────────────────
+   What a conversation needs occasionally, out of the way of what it needs on
+   every message. */
+.menu__anchor { position: relative; flex: none; }
+.menu__anchor[hidden] { display: none; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--s-2));
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - var(--s-6)));
+  padding: var(--s-2);
+  /* `--bg-raised` does not exist, so this rendered transparent and the page
+     read straight through the menu. Elevated is the token for a surface that
+     sits above the page. */
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  z-index: 40;
+}
+.menu[hidden] { display: none; }
+
+.menu__item {
+  display: block;
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md);
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.menu__item:hover { background: var(--bg-hover); color: var(--text-strong); }
+.menu__item[data-danger="true"] { color: var(--danger); }
+
+/* A setting rather than an action: it carries its own control. */
+.menu__field { padding: var(--s-2) var(--s-3); }
+.menu__field + .menu__item,
+.menu__item + .menu__field { border-top: 1px solid var(--border); margin-top: var(--s-2); padding-top: var(--s-3); }
+
+.menu__label {
+  display: block;
+  margin-bottom: var(--s-2);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.menu__field .select { width: 100%; }
+.menu__hint { display: block; margin-top: var(--s-2); font-size: var(--fs-2xs); color: var(--text-subtle); }

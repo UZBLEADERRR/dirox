@@ -352,6 +352,17 @@ function aiPanel(save) {
     ),
 
     h('div.card', { style: { marginTop: 'var(--s-4)' } },
+      /*
+         On by default, and off for anybody who would rather not be asked.
+
+         The plan is the cheapest moment to disagree — nothing written, nothing
+         spent past the planning call — which is why it asks. But being stopped
+         every time is its own cost, and somebody who has decided they do not
+         want that should not have to decide it again on every task.
+      */
+      row('Show the plan before starting', 'DiroxCode plans a substantial change and waits for you to say go. Turn this off and it starts straight away.',
+        switchControl(preferences.confirmPlan !== false, value => update({ confirmPlan: value }))),
+
       row('Run tests automatically', 'After changing code, run the project test suite and fix what breaks.',
         switchControl(preferences.autoTest !== false, value => update({ autoTest: value }))),
 

@@ -65,7 +65,16 @@ async function runOptions(ctx, project, { modelId = null } = {}) {
     // permissions: the router honours either only for a model an administrator
     // has opened to users.
     preferredModelId: modelId || preferences.defaultModelId || null,
-    autoTest: preferences.autoTest !== false
+    autoTest: preferences.autoTest !== false,
+    /*
+       Whether to show the plan and wait.
+
+       On by default, because the plan is the cheapest moment to disagree. Off
+       for anybody who would rather not be asked — being stopped every time is
+       its own cost, and a person who has decided that should not have to
+       decide it again on every task.
+    */
+    confirmPlan: preferences.confirmPlan !== false
   };
 }
 

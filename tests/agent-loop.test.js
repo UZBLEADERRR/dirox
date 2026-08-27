@@ -145,7 +145,7 @@ function turns(all = calls) {
 }
 
 /** Run one objective through the real loop and report what the model saw. */
-async function run(objective, { mode = 'agent', project = null, ...overrides } = {}) {
+async function run(objective, { mode = 'agent', project = null, options = {}, ...overrides } = {}) {
   const { runTask } = await import(`${SRC}agent/orchestrator.js`);
   const events = [];
 
@@ -159,7 +159,8 @@ async function run(objective, { mode = 'agent', project = null, ...overrides } =
     {
       project,
       auth: { user: { id: 'user-1' }, org: { id: 'org-1' }, role: 'owner' },
-      emit: (type, data) => events.push({ type, data })
+      emit: (type, data) => events.push({ type, data }),
+      ...options
     }
   );
 
@@ -620,4 +621,26 @@ test('a coding task is told which skills exist, and a greeting is not', async ()
   const greeting = await run('Salom');
   const greetingSystem = turns(greeting.calls).at(-1).messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
   assert.ok(!greetingSystem.includes('Skills'), 'a greeting was told about skills');
+});
+
+test('somebody who would rather not be asked is not asked', async () => {
+  /*
+     The plan gate is on by default because the plan is the cheapest moment to
+     disagree. But being stopped every time is its own cost, and a person who
+     has turned it off in settings should not have to turn it off again on
+     every task.
+  */
+  fresh('Done, all three steps.', [], PLAN);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, events } = await run('add rate limiting to the login endpoint', {
+    project, budget_micros: 5_000_000, options: { confirmPlan: false }
+  });
+
+  assert.equal(result.status, 'completed', 'the run stopped to ask despite the setting');
+  assert.ok(!events.some(event => event.type === 'approval'));
+
+  // The plan is still shown — not asking is not the same as not telling.
+  const plan = events.find(event => event.type === 'plan');
+  assert.equal(plan?.data.steps.length, 3);
 });

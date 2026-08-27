@@ -635,3 +635,31 @@
 /* The mode pill carries no icon: its own edge is the affordance, and on a
    phone eighteen pixels of gear is a fifth of the label beside it. */
 .composer__picker--plain { padding-left: var(--s-3); }
+
+/* ─── back to the latest ────────────────────────────────────────────────────
+   Appears only once the chat has stopped following, which is the only time it
+   means anything. Above the composer, out of the way of the text. */
+.chat__jump {
+  position: sticky;
+  bottom: var(--s-3);
+  align-self: center;
+  /* Costs no height in the flow, so the thread is not pushed up by it. */
+  margin-top: -34px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-full);
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+  cursor: pointer;
+  z-index: 3;
+}
+.chat__jump:hover { background: var(--bg-hover); color: var(--text-strong); }
+.chat__jump[hidden] { display: none; }
+
+/* Kept in the tree so its width can be measured and its value stays the one
+   source of truth, but never part of the bar. */
+.composer__picker--offstage { position: absolute; visibility: hidden; pointer-events: none; }

@@ -213,6 +213,79 @@ function sidebar() {
   );
 }
 
+/**
+ * The header's overflow menu.
+ *
+ * Everything a conversation needs occasionally and nothing it needs on every
+ * message. The project a chat works in is the clearest case: chosen once,
+ * never touched again, and it was taking a quarter of the composer bar on a
+ * phone for the privilege.
+ *
+ * Pages fill it through `setHeaderMenu`, so the shell does not have to know
+ * what a workspace or a project page wants in it.
+ */
+let menuSlot = null;
+let menuItems = [];
+
+/**
+ * @param {Array<{label:string, hint?:string, control?:Node, onSelect?:Function, danger?:boolean}>} items
+ */
+export function setHeaderMenu(items = []) {
+  menuItems = items;
+  if (menuSlot) menuSlot.hidden = items.length === 0;
+}
+
+export function clearHeaderMenu() { setHeaderMenu([]); }
+
+function overflowMenu() {
+  const list = h('div.menu', { role: 'menu', hidden: true });
+  const button = h('button.btn.btn--ghost.btn--icon.btn--sm', {
+    'aria-label': 'More', 'aria-haspopup': 'true', 'aria-expanded': 'false',
+    onClick: event => { event.stopPropagation(); toggle(); }
+  }, icon('more', { size: 17 }));
+
+  const wrap = h('div.menu__anchor', { hidden: true }, button, list);
+  menuSlot = wrap;
+
+  function close() {
+    list.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggle() {
+    if (!list.hidden) return close();
+
+    mount(list, menuItems.map(item => {
+      // An item with a control is a setting; one without is an action.
+      if (item.control) {
+        return h('div.menu__field',
+          h('span.menu__label', item.label),
+          item.control,
+          item.hint ? h('span.menu__hint', item.hint) : null);
+      }
+      return h('button.menu__item', {
+        role: 'menuitem',
+        'data-danger': item.danger ? 'true' : null,
+        onClick: () => { close(); item.onSelect?.(); }
+      }, item.label);
+    }));
+
+    list.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+  }
+
+  // Anywhere else, and Escape. A menu that stays open when you look away is a
+  // menu that gets in the way of the next thing you do.
+  document.addEventListener('click', event => {
+    if (!list.hidden && !wrap.contains(event.target)) close();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !list.hidden) close();
+  });
+
+  return wrap;
+}
+
 function topbar() {
   titleSlot = h('div.breadcrumb');
 
@@ -233,6 +306,7 @@ function topbar() {
     }, icon('menu', { size: 17 })),
     titleSlot,
     h('div.topbar__spacer'),
+    overflowMenu(),
     notificationsWrap,
     h('button.btn.btn--ghost.btn--icon.btn--sm.topbar__panel', {
       'aria-label': 'Toggle work panel',

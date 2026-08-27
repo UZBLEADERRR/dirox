@@ -48,6 +48,7 @@ export function createComposer({
   let projectId = initialProjectId;
   let running = false;
   const attachments = [];
+  const projectListeners = new Set();
 
   // Short enough to fit one line on a phone: a clipped placeholder is the
   // first thing a new user sees, and it reads as a broken field.
@@ -71,7 +72,12 @@ export function createComposer({
 
   const projectSelect = h('select.select.select--bare', {
     'aria-label': 'Project',
-    onChange: event => { projectId = event.target.value || null; syncModeAvailability(); fitSelect(projectSelect); }
+    onChange: event => {
+      projectId = event.target.value || null;
+      syncModeAvailability();
+      fitSelect(projectSelect);
+      for (const listener of projectListeners) listener(projectId);
+    }
   });
 
   const modelSelect = h('select.select.select--bare', {
@@ -79,7 +85,14 @@ export function createComposer({
     onChange: () => fitSelect(modelSelect)
   });
 
-  const projectWrap = h('label.composer__picker', { hidden: !showProjectPicker },
+  /*
+     Still built, never in the bar.
+
+     The header's menu drives the same `<select>`, so keeping it in the tree —
+     hidden — means one source of truth for the chosen project and no second
+     copy of the list to keep in step.
+  */
+  const projectWrap = h('label.composer__picker.composer__picker--offstage', { hidden: true },
     icon('folder', { size: 12 }), projectSelect);
 
   const modelWrap = h('label.composer__picker', { hidden: true },
@@ -275,13 +288,21 @@ export function createComposer({
     h('div.composer__inner',
       h('div.composer__box',
         gauge,
+        projectWrap,
         input,
         attachmentBar,
         h('div.composer__bar',
+          /*
+             Three controls, not four.
+
+             The project picker moved to the header's overflow menu. It is
+             chosen once for a conversation and then never touched, while the
+             other three are per-message — and on a phone a fourth pill pushed
+             the row onto a second line for something nobody was adjusting.
+          */
           h('div.composer__tools',
             attachButton,
             filePicker,
-            projectWrap,
             h('label.composer__picker.composer__picker--plain', modeSelect),
             modelWrap
           ),
@@ -313,6 +334,10 @@ export function createComposer({
       syncModeAvailability();
       fitSelect(projectSelect);
     },
+
+    /** The header menu asks what the choices are, and says when one is made. */
+    get projectsPickable() { return showProjectPicker; },
+    onProjectChange(listener) { projectListeners.add(listener); return () => projectListeners.delete(listener); },
 
     setRunning(value) {
       running = value;

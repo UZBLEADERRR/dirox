@@ -99,6 +99,9 @@ const ICONS = {
   sparkle: 'M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9z',
   arrowRight: 'M4 12h15M13 6l6 6-6 6',
   menu: 'M4 7h16M4 12h16M4 17h16',
+  // Three dots. Drawn as three one-pixel strokes so the round line cap
+  // renders them as circles at any size.
+  more: 'M12 5.01v.01M12 12v.01M12 18.99v.01',
   panel: 'M3 5h18v14H3zM14 5v14',
   logout: 'M15 5H6v14h9M18 12H10M15 9l3 3-3 3'
 };

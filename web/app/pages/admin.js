@@ -317,17 +317,25 @@ async function modelsSection() {
 
     const open = catalogue.filter(model => model.userSelectable).length;
 
+    /*
+       The search comes first.
+
+       It used to sit 436 pixels down the page, under two paragraphs of
+       reference prose and the Add button — on a phone that is a full screen of
+       scrolling before the one control anybody came here to use, which is why
+       people reported there was no search at all. The prose is reference; the
+       search is the tool.
+    */
     mount(container,
-      h('div.row.row--between', { style: { marginBottom: 'var(--s-4)', alignItems: 'flex-start' } },
-        h('div',
-          h('p.muted', { style: { fontSize: 'var(--fs-sm)', margin: '0' } },
-            'Prices are per million tokens. Verify against the provider price list before enabling a model.'),
-          h('p.subtle', { style: { fontSize: 'var(--fs-xs)', margin: 'var(--s-2) 0 0' } },
-            `Routing decides which model answers by default. Open to users decides what appears in the chat panel's model picker — ${open} of ${catalogue.length} ${open === 1 ? 'is' : 'are'} open.`)),
-        h('button.btn.btn--primary.btn--sm', { onClick: () => editModel(null, load) },
+      h('div.toolbar',
+        search,
+        h('button.btn.btn--primary.btn--sm.toolbar__action', { onClick: () => editModel(null, load) },
           icon('plus', { size: 13 }), 'Add model')),
 
-      h('div.row', { style: { marginBottom: 'var(--s-3)' } }, search),
+      h('div', { style: { margin: '0 0 var(--s-4)' } },
+        h('p.subtle', { style: { fontSize: 'var(--fs-xs)', margin: '0' } },
+          'Prices are per million tokens; verify against the provider price list before enabling a model. '
+          + `Routing decides which model answers by default. Open to users decides what appears in the chat model picker — ${open} of ${catalogue.length} ${open === 1 ? 'is' : 'are'} open.`)),
 
       rows.length
         ? tableCard(
