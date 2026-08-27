@@ -26,6 +26,7 @@ import { toolsFor, toolDefinitions, executeTool, availableGroups } from './tools
 import { groupsFor } from './tools/groups.js';
 import { packRunState, unpackRunState, trimConversation } from './runstate.js';
 import { runSubAgent } from './subagent.js';
+import { planBatch } from './parallel.js';
 import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
@@ -524,23 +525,105 @@ export async function runTask(task, options) {
       });
     };
 
+    /** One tool call, with the whole execution context it needs. */
+    const executeOne = async (call, limits) => {
+      emit('tool', { id: call.id, name: call.name, status: 'running', description: describeCall(call) });
+
+      const result = await executeTool(call, {
+        projectId: project?.id,
+        project,
+        orgId: auth.org.id,
+        userId: auth.user.id,
+        taskId: task.id,
+        trust: options.trust,
+        mode: task.mode,
+        role: auth.role,
+        signal,
+        approvedCalls,
+        toolOutputLimit: limits.toolOutputChars,
+        recordFileChange,
+        beforeFileChange,
+        // The loader records; the loop applies. A tool cannot widen the
+        // request it is already running inside.
+        loadedGroups: state.loadedGroups,
+        availableGroups: groupsAvailable,
+        loadGroup: group => { state.loadedGroups.add(group); state.toolsDirty = true; },
+        /*
+           Delegation.
+
+           The child gets its own conversation, its own slice of the budget
+           and its own row; the parent gets a paragraph. What it does not get
+           is a separate view of the work: file changes, deliverables and
+           spend all roll up here, so a delegated change is still covered by
+           the restore point, the summary and the post-run snapshot.
+        */
+        childCount: () => state.children.length,
+        delegate: async delegation => {
+          const outcome = await runSubAgent(delegation, {
+            task, project, auth, budget, signal, emit,
+            depth: 0,
+            delegationDepth,
+            share: Number(defaults.delegation_budget_share ?? 0.35),
+            options,
+            classification,
+            toolOptions,
+            loadedGroups: state.loadedGroups,
+            availableGroups: groupsAvailable,
+            recordFileChange,
+            beforeFileChange,
+            onDeliverable: file => {
+              state.deliverables.push(file);
+              emit('deliverable', file);
+            }
+          });
+          state.children.push({
+            role: delegation.role,
+            objective: delegation.objective,
+            ...outcome.metadata
+          });
+          return outcome;
+        },
+        // A file the user can save is worth its own event: the chat shows it
+        // as soon as it exists rather than only in the closing summary.
+        onDeliverable: file => {
+          state.deliverables.push(file);
+          emit('deliverable', file);
+        },
+        onOutput: chunk => emit('output', { tool: call.name, ...chunk })
+      });
+
+      emit('tool', {
+        id: call.id, name: call.name, status: result.status,
+        summary: firstLine(result.output), description: describeCall(call)
+      });
+
+      return result;
+    };
+
     /**
-     * Run one batch of tool calls.
+     * Run one turn's tool calls.
      *
-     * Returns the calls that never ran. That list is the whole reason this is
-     * a function rather than an inline block: when a call stops for approval,
-     * the ones queued behind it must be remembered, or resuming leaves an
-     * assistant turn whose tool calls have no results — which every provider
-     * rejects outright.
+     * Read-only calls that sit next to each other run together; everything
+     * else runs alone, in the order it was asked for. Four `read_file` calls
+     * in one turn used to take four round trips of waiting for no reason —
+     * nothing about any of them depends on the others.
+     *
+     * Results always go back in the order the model asked for them, whatever
+     * order they finished in, because the model reasons about its own
+     * ordering and a shuffled batch reads as a different set of answers.
+     *
+     * Returns the calls that never ran. When one stops for approval, the ones
+     * queued behind it have to be remembered, or resuming leaves an assistant
+     * turn whose tool calls have no results — which every provider rejects.
      */
     const runCalls = async (calls, limits) => {
       let anyFailed = false;
       state.toolResults = [];
 
-      for (const [index, call] of calls.entries()) {
-        abortIfCancelled();
-
-        // ── loop detection ──
+      // Loop detection runs over the whole turn first. It has to: a repeated
+      // action is a reason to stop before any of the batch executes, not after
+      // half of it has.
+      for (const call of calls) {
         const signature = `${call.name}:${JSON.stringify(call.arguments ?? {}).slice(0, 200)}`;
         state.recentActions.push(signature);
         if (state.recentActions.length > 12) state.recentActions.shift();
@@ -553,87 +636,36 @@ export async function runTask(task, options) {
           stopReason = 'loop';
           return { anyFailed, remaining: [] };
         }
+      }
 
-        emit('tool', { id: call.id, name: call.name, status: 'running', description: describeCall(call) });
+      const groups = await planBatch(calls, { projectId: project?.id, project, userId: auth.user.id });
+      let index = 0;
 
-        const result = await executeTool(call, {
-          projectId: project?.id,
-          project,
-          orgId: auth.org.id,
-          userId: auth.user.id,
-          taskId: task.id,
-          trust: options.trust,
-          mode: task.mode,
-          role: auth.role,
-          signal,
-          approvedCalls,
-          toolOutputLimit: limits.toolOutputChars,
-          recordFileChange,
-          beforeFileChange,
-          // The loader records; the loop applies. A tool cannot widen the
-          // request it is already running inside.
-          loadedGroups: state.loadedGroups,
-          availableGroups: groupsAvailable,
-          loadGroup: group => { state.loadedGroups.add(group); state.toolsDirty = true; },
-          /*
-             Delegation.
+      for (const group of groups) {
+        abortIfCancelled();
 
-             The child gets its own conversation, its own slice of the budget
-             and its own row; the parent gets a paragraph. What it does not get
-             is a separate view of the work: file changes, deliverables and
-             spend all roll up here, so a delegated change is still covered by
-             the restore point, the summary and the post-run snapshot.
-          */
-          childCount: () => state.children.length,
-          delegate: async delegation => {
-            const outcome = await runSubAgent(delegation, {
-              task, project, auth, budget, signal, emit,
-              depth: 0,
-              delegationDepth,
-              share: Number(defaults.delegation_budget_share ?? 0.35),
-              options,
-              classification,
-              toolOptions,
-              loadedGroups: state.loadedGroups,
-              availableGroups: groupsAvailable,
-              recordFileChange,
-              beforeFileChange,
-              onDeliverable: file => {
-                state.deliverables.push(file);
-                emit('deliverable', file);
-              }
-            });
-            state.children.push({
-              role: delegation.role,
-              objective: delegation.objective,
-              ...outcome.metadata
-            });
-            return outcome;
-          },
-          // A file the user can save is worth its own event: the chat shows it
-          // as soon as it exists rather than only in the closing summary.
-          onDeliverable: file => {
-            state.deliverables.push(file);
-            emit('deliverable', file);
-          },
-          onOutput: chunk => emit('output', { tool: call.name, ...chunk })
-        });
+        const results = group.length === 1
+          ? [await executeOne(group[0], limits)]
+          : await Promise.all(group.map(call => executeOne(call, limits)));
 
-        emit('tool', {
-          id: call.id, name: call.name, status: result.status,
-          summary: firstLine(result.output), description: describeCall(call)
-        });
+        for (const [offset, result] of results.entries()) {
+          const call = group[offset];
 
-        if (result.status === 'awaiting_approval') {
-          pendingApproval = result.approval;
-          // This call and everything behind it: none of them ran.
-          return { anyFailed, remaining: calls.slice(index) };
+          if (result.status === 'awaiting_approval') {
+            pendingApproval = result.approval;
+            // This call and everything behind it: none of them ran. Only a
+            // call that runs alone can reach this, so nothing in flight is
+            // being abandoned.
+            return { anyFailed, remaining: calls.slice(index + offset) };
+          }
+
+          state.toolResults.push({ toolCallId: call.id, tool: call.name, output: result.output });
+          state.conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: result.output });
+
+          if (!result.ok) anyFailed = true;
         }
 
-        state.toolResults.push({ toolCallId: call.id, tool: call.name, output: result.output });
-        state.conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: result.output });
-
-        if (!result.ok) anyFailed = true;
+        index += group.length;
       }
 
       return { anyFailed, remaining: [] };

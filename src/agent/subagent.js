@@ -44,6 +44,7 @@ import { assembleContext } from '../context/engine.js';
 import { TokenBudget } from '../context/budget.js';
 import { toolsFor, toolDefinitions, executeTool } from './tools/index.js';
 import { trimConversation } from './runstate.js';
+import { planBatch } from './parallel.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
 import { cancelled } from '../core/errors.js';
 import { logger } from '../core/logger.js';
@@ -294,9 +295,10 @@ export async function runSubAgent(request, parent) {
         }))
       });
 
-      for (const call of result.toolCalls.slice(0, 6)) {
-        if (parent.signal?.aborted) throw cancelled('The task was stopped');
+      const batch = result.toolCalls.slice(0, 6);
+      const groups = await planBatch(batch, { projectId: parent.project?.id, project: parent.project, userId: parent.auth.user.id });
 
+      const runOne = async call => {
         emit('tool', { id: call.id, name: call.name, status: 'running', description: `[${role}] ${call.name}`, delegated: role });
 
         const outcome = await executeTool(call, {
@@ -342,23 +344,45 @@ export async function runSubAgent(request, parent) {
           description: `[${role}] ${call.name}`, delegated: role
         });
 
-        /*
-           A child cannot wait for a person.
+        return outcome;
+      };
 
-           Its conversation is not written down, so pausing would mean losing
-           it. Instead the decision goes back to the parent, which holds the
-           run state and can pause properly — and which, unlike the child, the
-           user is actually watching.
-        */
-        if (outcome.status === 'awaiting_approval') {
-          stopped = `This needs your approval, which a sub-agent cannot ask for: ${outcome.approval?.description || call.name}. `
-            + 'Run that step yourself rather than delegating it.';
-          conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: stopped });
-          steps = maxSteps;
-          break;
+      let halted = false;
+      for (const group of groups) {
+        if (parent.signal?.aborted) throw cancelled('The task was stopped');
+
+        const outcomes = group.length === 1
+          ? [await runOne(group[0])]
+          : await Promise.all(group.map(runOne));
+
+        for (const [offset, outcome] of outcomes.entries()) {
+          const call = group[offset];
+
+          /*
+             A child cannot wait for a person.
+
+             Its conversation is not written down, so pausing would mean losing
+             it. Instead the decision goes back to the parent, which holds the
+             run state and can pause properly — and which, unlike the child,
+             the user is actually watching.
+          */
+          if (outcome.status === 'awaiting_approval') {
+            stopped = `This needs your approval, which a sub-agent cannot ask for: ${outcome.approval?.description || call.name}. `
+              + 'Run that step yourself rather than delegating it.';
+            conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: stopped });
+            halted = true;
+            break;
+          }
+
+          conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: outcome.output });
         }
 
-        conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: outcome.output });
+        if (halted) break;
+      }
+
+      if (halted) {
+        steps = maxSteps;
+        break;
       }
 
       // Trimmed on a whole turn: a tool result must never outlive its call.

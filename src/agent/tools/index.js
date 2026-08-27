@@ -179,6 +179,38 @@ export function toolDefinitions(tools) {
   }));
 }
 
+/**
+ * What risk this particular call carries, without running it.
+ *
+ * `executeTool` works this out anyway, but the scheduler needs to know before
+ * it decides what may run alongside what — and a tool that computes its risk
+ * from its arguments (a command, a SQL script) cannot be classified by name.
+ *
+ * Anything that cannot be resolved comes back as destructive, because the only
+ * safe assumption about a call we do not understand is that it changes things.
+ */
+export async function effectiveRisk(call, ctx = {}) {
+  const tool = BY_NAME.get(call.name);
+  // An unknown tool never runs; it returns an error message. Nothing it can
+  // do is unsafe to do alongside something else.
+  if (!tool) return RISK.SAFE;
+
+  let args;
+  try {
+    args = parse(tool.schema, call.arguments ?? {});
+  } catch {
+    // Invalid arguments are rejected before the tool runs, so the declared
+    // risk is the honest answer and it is never acted on.
+    return tool.risk;
+  }
+
+  try {
+    return tool.riskFor ? await tool.riskFor(args, ctx) : tool.risk;
+  } catch {
+    return RISK.DESTRUCTIVE;
+  }
+}
+
 export function getTool(name) { return BY_NAME.get(name) ?? null; }
 export function allTools() { return ALL_TOOLS; }
 

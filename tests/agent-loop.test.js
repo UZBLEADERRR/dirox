@@ -455,3 +455,32 @@ test('delegating keeps the parent small, which is the whole point', async () => 
   assert.ok(delegatedFinal < inlineFinal * 0.6,
     `the parent's closing turn cost ${delegatedFinal} tokens delegated against ${inlineFinal} inline — delegation is not paying for itself`);
 });
+
+test('a batch of reads comes back in the order it was asked for', async () => {
+  /*
+     The calls run together; the answers must not arrive shuffled. A model
+     reasons about its own ordering — "read the route file, then the handler,
+     then the test" — and a batch returned out of order reads as a different
+     set of answers to a different set of questions.
+  */
+  fresh('Read all three.', [{
+    text: '',
+    toolCalls: [
+      { id: 'c-1', name: 'first_lookup', arguments: {} },
+      { id: 'c-2', name: 'second_lookup', arguments: {} },
+      { id: 'c-3', name: 'third_lookup', arguments: {} }
+    ]
+  }]);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('read the three session files and summarise them', {
+    project, budget_micros: 5_000_000
+  });
+
+  const results = turns(made).at(-1).messages
+    .filter(message => message.role === 'tool')
+    .map(message => message.tool_call_id);
+
+  assert.deepEqual(results.slice(0, 3), ['c-1', 'c-2', 'c-3'],
+    `the answers came back as ${results.join(', ')}`);
+});
