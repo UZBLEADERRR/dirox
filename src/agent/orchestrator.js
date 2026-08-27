@@ -17,13 +17,14 @@
 
 import { complete } from '../ai/gateway.js';
 import { classify, classifierPrompt, parseClassification, route, escalate } from '../ai/router.js';
-import { classifyIntent, intentPrompt, parseIntent, shouldVerifyIntent } from './intent.js';
+import { classifyIntent, intentPrompt, parseIntent, shouldVerifyIntent, PROFILES } from './intent.js';
 import { systemSetting } from '../ai/catalog.js';
 import { assembleContext } from '../context/engine.js';
 import { TokenBudget, defaultBudgetFor } from '../context/budget.js';
 import { plannerPrompt } from './prompts.js';
 import { toolsFor, toolDefinitions, executeTool, availableGroups } from './tools/index.js';
 import { groupsFor } from './tools/groups.js';
+import { packRunState, unpackRunState, trimConversation } from './runstate.js';
 import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
@@ -34,7 +35,36 @@ import { runtimeStats } from '../modules/observability/audit.js';
 const PHASES = {
   INTENT: 'intent', CLASSIFY: 'classify', PLAN: 'plan', RETRIEVE: 'retrieve', MODEL: 'model',
   TOOL: 'tool', OBSERVE: 'observe', VALIDATE: 'validate', REVIEW: 'review',
-  CHECKPOINT: 'checkpoint', FINALIZE: 'finalize'
+  CHECKPOINT: 'checkpoint', DELEGATE: 'delegate', FINALIZE: 'finalize'
+};
+
+/**
+ * How long a run may go on.
+ *
+ * There used to be a hard ceiling of forty steps here, and it was the wrong
+ * instrument. Forty steps is not a measure of anything: a task that needs
+ * sixty is not more dangerous than one that needs thirty, it is just larger,
+ * and stopping it at forty produced a half-migrated repository and an apology.
+ *
+ * Three limits replace it, and each one is a real condition rather than a
+ * round number:
+ *
+ *   budget      the money is gone. This is the honest limit and always was.
+ *   stall       several steps in a row produced nothing new — no file changed,
+ *               no action attempted that had not already been attempted. A run
+ *               in that state does not recover by being given more steps.
+ *   deadline    wall-clock. A container is not promised to us forever, and a
+ *               run that will be killed mid-write should stop itself first,
+ *               with its state written down, while it still can.
+ *
+ * The iteration count survives only as a ceiling an operator can set, so a
+ * misconfigured budget cannot spin forever.
+ */
+const RUN_LIMITS = {
+  max_iterations: 40,
+  iteration_ceiling: 200,
+  max_runtime_ms: 45 * 60 * 1000,
+  stall_window: 6
 };
 
 /**
@@ -46,9 +76,15 @@ const PHASES = {
  */
 export async function runTask(task, options) {
   const { project, auth, emit = () => {}, signal, approvedCalls = new Set() } = options;
-  const defaults = await systemSetting('agent.defaults', {
-    max_iterations: 18, loop_detection_window: 3, escalation_attempts: 2, tool_output_limit: 6000
-  });
+  // Merged rather than defaulted: a deployment whose `agent.defaults` predates
+  // these keys would otherwise get none of them, and the run would inherit a
+  // ceiling of `undefined`.
+  const stored = await systemSetting('agent.defaults', {});
+  const defaults = {
+    loop_detection_window: 3, escalation_attempts: 2, tool_output_limit: 6000,
+    ...RUN_LIMITS,
+    ...(stored && typeof stored === 'object' ? stored : {})
+  };
 
   const budget = new TokenBudget({
     budgetMicros: Number(task.budget_micros),
@@ -56,19 +92,36 @@ export async function runTask(task, options) {
     level: task.complexity || 'level1'
   });
 
+  /*
+     Is there a run here already?
+
+     An approval pause, a redeployed container or a reclaimed worker all leave
+     a task that was genuinely part-way through. Restarting it repeats work the
+     user has already paid for and, worse, repeats writes. So the loop reads
+     back what it wrote down and continues from there.
+  */
+  const resumed = options.resumeState === false ? null : unpackRunState(task.run_state);
+
   const state = {
-    stepIndex: Number(task.iterations || 0),
-    changedFiles: new Map(),
+    stepIndex: resumed?.stepIndex ?? Number(task.iterations || 0),
+    changedFiles: new Map((resumed?.changedFiles ?? []).map(file => [file.path, file])),
     toolResults: [],
-    recentActions: [],
+    recentActions: resumed?.recentActions ?? [],
     consecutiveFailures: 0,
-    escalations: 0,
-    checkpointed: false,
-    checkpointId: null,
-    conversation: [],
-    deliverables: [],
+    escalations: resumed?.escalations ?? 0,
+    checkpointed: Boolean(resumed?.checkpointId),
+    checkpointId: resumed?.checkpointId ?? null,
+    conversation: resumed?.conversation ?? [],
+    deliverables: resumed?.deliverables ?? [],
     /** Tool groups this run has pulled in, beyond the core set. */
-    loadedGroups: new Set()
+    loadedGroups: new Set(resumed?.loadedGroups ?? []),
+    /** Distinct actions attempted. Novelty is how progress is measured. */
+    signatures: new Set(resumed?.recentActions ?? []),
+    /** Iterations since anything new happened. */
+    sinceProgress: 0,
+    /** Delegated runs this task has spawned. */
+    children: [],
+    startedAt: Date.now()
   };
 
   const recordFileChange = (path, kind) => {
@@ -218,7 +271,14 @@ export async function runTask(task, options) {
       conversationTurns: Number(task.iterations || 0)
     });
 
-    if (shouldVerifyIntent(intent) && budget.pressure === 'comfortable') {
+    // A resumed run keeps the intent it was already running under: it has a
+    // conversation, loaded tool groups and changed files that only make sense
+    // under that reading, and re-deciding could take them all away.
+    if (resumed?.intent && PROFILES[resumed.intent]) {
+      intent = { intent: resumed.intent, profile: PROFILES[resumed.intent], confidence: 1, reason: 'resumed' };
+    }
+
+    if (!resumed && shouldVerifyIntent(intent) && budget.pressure === 'comfortable') {
       const verified = await verifyIntent(intent, task, { auth, project, signal, allowedTiers: options.allowedTiers, budget })
         .catch(() => intent);
       intent = verified;
@@ -241,6 +301,12 @@ export async function runTask(task, options) {
       mode: task.mode,
       hasError: /error|exception|traceback|stack trace|failing/i.test(task.objective)
     });
+
+    // A resumed run was already classified, and re-deciding mid-task would
+    // change the model under a conversation that is half-finished.
+    if (resumed?.level) {
+      classification = { ...classification, level: resumed.level, category: resumed.category ?? classification.category, confidence: 1 };
+    }
 
     if (classification.confidence < 0.6 && budget.pressure === 'comfortable') {
       // Only pay for a classifier call when the heuristic is genuinely unsure.
@@ -293,8 +359,11 @@ export async function runTask(task, options) {
     await updateTask(task.id, { primary_model_id: currentRoute.model.id });
 
     // ── 3. checkpoint before the first change ────────────────────────────────
-    // A read-only intent cannot write, so there is nothing to restore.
-    if (project && intent.intent === 'code' && ['agent', 'autopilot', 'edit', 'debug'].includes(task.mode)) {
+    // A read-only intent cannot write, so there is nothing to restore. A
+    // resumed run already has one, and a second would capture the files as
+    // they are *after* the first half of the work — a restore point that
+    // restores to the middle of the change is worse than none.
+    if (project && !state.checkpointId && intent.intent === 'code' && ['agent', 'autopilot', 'edit', 'debug'].includes(task.mode)) {
       await step(PHASES.CHECKPOINT, 'Creating a restore point', async () => {
         const checkpoint = await createCheckpoint({
           projectId: project.id, taskId: task.id, kind: 'pre_task',
@@ -307,8 +376,10 @@ export async function runTask(task, options) {
     }
 
     // ── 4. plan, for anything non-trivial ────────────────────────────────────
-    let plan = null;
-    if (intent.intent === 'code' && classification.level !== 'level0' && task.mode !== 'ask') {
+    // A resumed run keeps the plan it was working to. Planning again would
+    // cost a model call to produce a plan for work that is already half done.
+    let plan = resumed && task.plan && Object.keys(task.plan).length ? task.plan : null;
+    if (!plan && intent.intent === 'code' && classification.level !== 'level0' && task.mode !== 'ask') {
       plan = await step(PHASES.PLAN, 'Planning the work', async () => {
         const planRoute = await route({
           category: 'plan',
@@ -391,18 +462,176 @@ export async function runTask(task, options) {
       emit('notice', { level: 'info', message: `Loaded tools: ${[...state.loadedGroups].join(', ')}.` });
     }
 
-    const maxIterations = Math.min(Number(task.max_iterations) || defaults.max_iterations, 40);
-    let iteration = 0;
-    let finalText = '';
-    let pendingApproval = null;
+    /*
+       How long this run may go on.
 
-    while (iteration < maxIterations) {
+       The requested length is the task's own, the ceiling is the operator's,
+       and neither is the limit that usually bites: budget, stalling and the
+       wall clock are. A ceiling still exists so a misconfigured budget cannot
+       spin forever, but it is set where a real task will not meet it.
+    */
+    const ceiling = Math.max(1, Number(defaults.iteration_ceiling) || RUN_LIMITS.iteration_ceiling);
+    const maxIterations = Math.min(
+      Number(task.max_iterations) || Number(defaults.max_iterations) || RUN_LIMITS.max_iterations,
+      ceiling
+    );
+    const deadline = state.startedAt + (Number(defaults.max_runtime_ms) || RUN_LIMITS.max_runtime_ms);
+    const stallWindow = Math.max(2, Number(defaults.stall_window) || RUN_LIMITS.stall_window);
+
+    /*
+       Iterations count this attempt, not the task's whole history.
+
+       A resumed run has to be able to do work, and a cumulative count would
+       mean a run that stopped at its ceiling could only ever resume into the
+       same wall. Total spend is bounded by the budget, which *is* cumulative —
+       `spent_micros` is carried across attempts — so nothing is unbounded here.
+       `state.stepIndex` keeps the numbering continuous for the timeline.
+    */
+    const priorIterations = resumed?.iteration ?? 0;
+    let iteration = 0;
+    let finalText = resumed?.finalText ?? '';
+    let pendingApproval = null;
+    /** Why the loop stopped, when it was not the model deciding it was done. */
+    let stopReason = null;
+
+    /**
+     * Write down enough to continue.
+     *
+     * Called after every iteration and before every pause. The cost is one
+     * update per step against a row we are already updating; what it buys is a
+     * run that survives the container it started in.
+     */
+    const saveRunState = async (pendingCalls = []) => {
+      await updateTask(task.id, {
+        iterations: state.stepIndex,
+        spent_micros: budget.spentMicros,
+        changed_files: [...state.changedFiles.values()],
+        run_state: packRunState(state, {
+          iteration: priorIterations + iteration,
+          intent: intent.intent,
+          category: classification.category,
+          level: classification.level,
+          finalText,
+          pendingCalls
+        })
+      });
+    };
+
+    /**
+     * Run one batch of tool calls.
+     *
+     * Returns the calls that never ran. That list is the whole reason this is
+     * a function rather than an inline block: when a call stops for approval,
+     * the ones queued behind it must be remembered, or resuming leaves an
+     * assistant turn whose tool calls have no results — which every provider
+     * rejects outright.
+     */
+    const runCalls = async (calls, limits) => {
+      let anyFailed = false;
+      state.toolResults = [];
+
+      for (const [index, call] of calls.entries()) {
+        abortIfCancelled();
+
+        // ── loop detection ──
+        const signature = `${call.name}:${JSON.stringify(call.arguments ?? {}).slice(0, 200)}`;
+        state.recentActions.push(signature);
+        if (state.recentActions.length > 12) state.recentActions.shift();
+        const repeats = state.recentActions.filter(action => action === signature).length;
+        state.signatures.add(signature);
+
+        if (repeats > (defaults.loop_detection_window ?? 3)) {
+          emit('notice', { level: 'warning', message: `Stopping: the same action (${call.name}) was repeated ${repeats} times without progress.` });
+          finalText = finalText || `I repeated the same action (${call.name}) without making progress, so I stopped rather than continuing to spend budget. The underlying problem may need a different approach.`;
+          stopReason = 'loop';
+          return { anyFailed, remaining: [] };
+        }
+
+        emit('tool', { id: call.id, name: call.name, status: 'running', description: describeCall(call) });
+
+        const result = await executeTool(call, {
+          projectId: project?.id,
+          project,
+          orgId: auth.org.id,
+          userId: auth.user.id,
+          taskId: task.id,
+          trust: options.trust,
+          mode: task.mode,
+          role: auth.role,
+          signal,
+          approvedCalls,
+          toolOutputLimit: limits.toolOutputChars,
+          recordFileChange,
+          beforeFileChange,
+          // The loader records; the loop applies. A tool cannot widen the
+          // request it is already running inside.
+          loadedGroups: state.loadedGroups,
+          availableGroups: groupsAvailable,
+          loadGroup: group => { state.loadedGroups.add(group); state.toolsDirty = true; },
+          // A file the user can save is worth its own event: the chat shows it
+          // as soon as it exists rather than only in the closing summary.
+          onDeliverable: file => {
+            state.deliverables.push(file);
+            emit('deliverable', file);
+          },
+          onOutput: chunk => emit('output', { tool: call.name, ...chunk })
+        });
+
+        emit('tool', {
+          id: call.id, name: call.name, status: result.status,
+          summary: firstLine(result.output), description: describeCall(call)
+        });
+
+        if (result.status === 'awaiting_approval') {
+          pendingApproval = result.approval;
+          // This call and everything behind it: none of them ran.
+          return { anyFailed, remaining: calls.slice(index) };
+        }
+
+        state.toolResults.push({ toolCallId: call.id, tool: call.name, output: result.output });
+        state.conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: result.output });
+
+        if (!result.ok) anyFailed = true;
+      }
+
+      return { anyFailed, remaining: [] };
+    };
+
+    /*
+       A run picked up mid-flight.
+
+       The calls that were waiting on a person run first, before the model is
+       asked for anything new. Only then does the conversation make sense
+       again: every tool call in it has a result.
+    */
+    if (resumed?.pendingCalls?.length && !budget.exhausted) {
+      emit('notice', { level: 'info', message: `Continuing where this task stopped, at step ${state.stepIndex}.` });
+      const limits = await budget.limits({ model: currentRoute.model, level: classification.level });
+      const outcome = await runCalls(resumed.pendingCalls, limits);
+      state.consecutiveFailures = outcome.anyFailed ? 1 : 0;
+      if (pendingApproval) {
+        await saveRunState(outcome.remaining);
+      }
+    }
+
+    while (!pendingApproval && !stopReason && iteration < maxIterations) {
       abortIfCancelled();
       iteration += 1;
 
       if (budget.exhausted) {
         finalText = finalText || 'The task budget was used up before the work could be finished.';
         emit('notice', { level: 'warning', message: 'Budget exhausted — stopping to avoid further spend.' });
+        stopReason = 'budget';
+        break;
+      }
+
+      // The wall clock. A container is not promised to us indefinitely, and a
+      // run that stops itself with its state written down can be continued;
+      // one killed mid-write cannot.
+      if (Date.now() > deadline) {
+        emit('notice', { level: 'warning', message: 'This run reached its time limit and stopped with its progress saved. Ask it to continue.' });
+        finalText = finalText || 'I reached the time limit for a single run. The work so far is saved — ask me to continue and I will pick it up.';
+        stopReason = 'deadline';
         break;
       }
 
@@ -414,13 +643,17 @@ export async function runTask(task, options) {
 
       const limits = await budget.limits({ model: currentRoute.model, level: classification.level });
 
+      // What counts as progress: something changed, or something was tried
+      // that had not been tried before. Measured across the iteration.
+      const before = { actions: state.signatures.size, files: state.changedFiles.size, children: state.children.length };
+
       // ── retrieve ──
       const context = await step(PHASES.RETRIEVE, 'Gathering context', async () => {
         const assembled = await assembleContext({
           projectId: project?.id,
           orgId: auth.org.id,
           userId: auth.user.id,
-          objective: buildObjective(task, plan, state, iteration),
+          objective: buildObjective(task, plan, state, priorIterations + iteration),
           mode: task.mode,
           limits,
           history: state.conversation,
@@ -460,11 +693,13 @@ export async function runTask(task, options) {
           currentRoute = cheaper;
         } else {
           finalText = finalText || 'The remaining budget is too small to continue safely.';
+          stopReason = 'budget';
           break;
         }
       }
 
-      const response = await step(PHASES.MODEL, iteration === 1 ? 'Working on the task' : 'Continuing', async () => {
+      const title = iteration === 1 && !priorIterations ? 'Working on the task' : 'Continuing';
+      const response = await step(PHASES.MODEL, title, async () => {
         const result = await complete({
           messages: context.messages,
           routeResult: currentRoute,
@@ -508,75 +743,15 @@ export async function runTask(task, options) {
         }))
       });
 
-      let anyFailed = false;
-      state.toolResults = [];
+      const outcome = await runCalls(response.toolCalls.slice(0, 8), limits);
 
-      for (const call of response.toolCalls.slice(0, 8)) {
-        abortIfCancelled();
-
-        // ── loop detection ──
-        const signature = `${call.name}:${JSON.stringify(call.arguments).slice(0, 200)}`;
-        state.recentActions.push(signature);
-        if (state.recentActions.length > 12) state.recentActions.shift();
-        const repeats = state.recentActions.filter(action => action === signature).length;
-
-        if (repeats > (defaults.loop_detection_window ?? 3)) {
-          emit('notice', { level: 'warning', message: `Stopping: the same action (${call.name}) was repeated ${repeats} times without progress.` });
-          finalText = finalText || `I repeated the same action (${call.name}) without making progress, so I stopped rather than continuing to spend budget. The underlying problem may need a different approach.`;
-          iteration = maxIterations;
-          break;
-        }
-
-        emit('tool', { id: call.id, name: call.name, status: 'running', description: describeCall(call) });
-
-        const result = await executeTool(call, {
-          projectId: project?.id,
-          project,
-          orgId: auth.org.id,
-          userId: auth.user.id,
-          taskId: task.id,
-          trust: options.trust,
-          mode: task.mode,
-          role: auth.role,
-          signal,
-          approvedCalls,
-          toolOutputLimit: limits.toolOutputChars,
-          recordFileChange,
-          beforeFileChange,
-          // The loader records; the loop applies. A tool cannot widen the
-          // request it is already running inside.
-          loadedGroups: state.loadedGroups,
-          availableGroups: groupsAvailable,
-          loadGroup: group => { state.loadedGroups.add(group); state.toolsDirty = true; },
-          // A file the user can save is worth its own event: the chat shows it
-          // as soon as it exists rather than only in the closing summary.
-          onDeliverable: file => {
-            state.deliverables.push(file);
-            emit('deliverable', file);
-          },
-          onOutput: chunk => emit('output', { tool: call.name, ...chunk })
-        });
-
-        emit('tool', {
-          id: call.id, name: call.name, status: result.status,
-          summary: firstLine(result.output), description: describeCall(call)
-        });
-
-        if (result.status === 'awaiting_approval') {
-          pendingApproval = result.approval;
-          break;
-        }
-
-        state.toolResults.push({ toolCallId: call.id, tool: call.name, output: result.output });
-        state.conversation.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: result.output });
-
-        if (!result.ok) anyFailed = true;
+      if (pendingApproval) {
+        await saveRunState(outcome.remaining);
+        break;
       }
 
-      if (pendingApproval) break;
-
       // ── escalate only after a measured failure ──
-      state.consecutiveFailures = anyFailed ? state.consecutiveFailures + 1 : 0;
+      state.consecutiveFailures = outcome.anyFailed ? state.consecutiveFailures + 1 : 0;
       if (state.consecutiveFailures >= 2 && state.escalations < (defaults.escalation_attempts ?? 2)) {
         const stronger = await escalate(currentRoute, { allowedTiers: options.allowedTiers, attempt: state.escalations + 1 });
         if (stronger) {
@@ -589,9 +764,36 @@ export async function runTask(task, options) {
         }
       }
 
-      // Trim the conversation so it cannot grow without bound.
-      if (state.conversation.length > 24) state.conversation = state.conversation.slice(-16);
+      /*
+         Stalling.
+
+         Loop detection catches the same call repeated verbatim. This catches
+         the subtler version: several iterations in a row where nothing new was
+         attempted and nothing changed — a model reading the same four files in
+         a different order, or reasoning in circles without touching anything.
+         Neither recovers by being given more steps, and both cost money for
+         every one it is given.
+      */
+      const progressed = state.signatures.size > before.actions
+        || state.changedFiles.size > before.files
+        || state.children.length > before.children;
+      state.sinceProgress = progressed ? 0 : state.sinceProgress + 1;
+
+      if (state.sinceProgress >= stallWindow) {
+        emit('notice', { level: 'warning', message: `Stopping: ${state.sinceProgress} steps in a row produced nothing new.` });
+        finalText = finalText || `I went ${state.sinceProgress} steps without making progress, so I stopped rather than spending more of the budget. ${state.changedFiles.size ? 'The changes made so far are saved.' : 'Nothing was changed.'}`;
+        stopReason = 'stalled';
+        break;
+      }
+
+      // Trim the conversation so it cannot grow without bound — on a whole
+      // turn, so a tool result never outlives the call that produced it.
+      if (state.conversation.length > 24) state.conversation = trimConversation(state.conversation);
+
+      await saveRunState();
     }
+
+    if (iteration >= maxIterations && !stopReason) stopReason = 'iterations';
 
     // ── 6. approval pause ────────────────────────────────────────────────────
     if (pendingApproval) {
@@ -669,8 +871,8 @@ export async function runTask(task, options) {
       }
     }
 
-    if (iteration >= maxIterations && !finalText) {
-      finalText = `I reached the ${maxIterations}-step limit for this task without finishing. ${changedFiles.length ? `${changedFiles.length} files were changed — review them before continuing.` : 'No files were changed.'}`;
+    if (stopReason === 'iterations' && !finalText) {
+      finalText = `I reached this run's step ceiling (${maxIterations}) without finishing. The work so far is saved — ask me to continue and I will pick it up from here. ${changedFiles.length ? `${changedFiles.length} file(s) were changed.` : 'No files were changed.'}`;
     }
 
     // ── 8. finish ────────────────────────────────────────────────────────────
@@ -692,11 +894,15 @@ export async function runTask(task, options) {
       spent_micros: budget.spentMicros,
       iterations: state.stepIndex,
       changed_files: changedFiles,
+      // The loop is over, so there is nothing to pick up. Leaving the state
+      // behind would mean a re-run of this task resumed a conversation that
+      // had already reached its answer.
+      run_state: {},
       result
     });
 
     emit('done', { ...result, budget: budget.toJSON() });
-    return { status: 'completed', ...result, budget: budget.toJSON(), iterations: state.stepIndex };
+    return { status: 'completed', ...result, budget: budget.toJSON(), iterations: state.stepIndex, stopReason };
   } catch (error) {
     const app = error instanceof AppError ? error : new AppError(String(error?.message || error));
     const isCancel = app.code === 'cancelled';

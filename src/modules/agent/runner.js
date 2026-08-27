@@ -145,11 +145,30 @@ export function stopTask(taskId) {
   return true;
 }
 
-/** Approve a paused tool call and resume the task. */
+/**
+ * Approve a paused tool call and continue the run.
+ *
+ * This used to start the task over. Everything the run had done — the
+ * conversation, the tool groups it had paid to load, the results it had
+ * already gathered — was thrown away, and the user paid for all of it a second
+ * time to get back to the call they had just approved. The run now writes its
+ * state down when it pauses, so approving continues from the pending call
+ * rather than from the beginning.
+ *
+ * The row is re-read rather than trusted: the caller's copy was loaded before
+ * the pause was written, so it has no `run_state` on it.
+ */
 export async function approveAndResume(task, callId, options) {
   const approved = new Set([callId]);
+  const current = hasServiceRole()
+    ? await serviceClient().from('tasks').select('*').eq('id', task.id).first().catch(() => null)
+    : null;
+
   await updateTask(task.id, { status: 'running', approval: null });
-  return startTask({ ...task, status: 'running' }, { ...options, approvedCalls: approved });
+  return startTask({ ...task, ...(current || {}), status: 'running', approval: null }, {
+    ...options,
+    approvedCalls: approved
+  });
 }
 
 async function afterRun(task, result, auth) {

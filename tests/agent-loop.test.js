@@ -18,6 +18,14 @@ const SRC = new URL('../src/', import.meta.url).href;
 let calls = [];
 let reply = 'Salom! Nima qilib beray?';
 
+/**
+ * Answers queued ahead of `reply`, for cases that need more than one turn.
+ *
+ * Each entry is `{ text, toolCalls }`. When the queue empties the loop gets
+ * `reply` with no tool calls, which is how a scripted run ends.
+ */
+let script = [];
+
 const MODEL = {
   id: 'model-1', code: 'test/haiku', name: 'Test Haiku', max_output: 8192,
   supports_tools: true, supports_prompt_cache: true, supports_vision: false,
@@ -31,12 +39,13 @@ const MODEL = {
     namedExports: {
       async complete(request) {
         calls.push(request);
+        const next = script.length ? script.shift() : null;
         return {
-          text: reply,
-          toolCalls: [],
+          text: next ? (next.text ?? '') : reply,
+          toolCalls: next?.toolCalls ?? [],
           usage: { inputTokens: 30, outputTokens: 12, cachedInputTokens: 0 },
           costMicros: 24,
-          finishReason: 'stop',
+          finishReason: next?.toolCalls?.length ? 'tool_calls' : 'stop',
           model: MODEL
         };
       }
@@ -78,13 +87,26 @@ const MODEL = {
 }
 
 /** Start each case from a clean record. */
-function fresh(answer) {
+function fresh(answer, turns = []) {
   calls = [];
   reply = answer;
+  script = turns;
+}
+
+/**
+ * A model turn that calls one tool.
+ *
+ * The tool does not exist, and that is deliberate: `executeTool` answers an
+ * unknown name without touching the filesystem or the database, so the loop's
+ * own behaviour — how long it runs, what it counts as progress — can be
+ * measured without a workspace standing in the way.
+ */
+function callTool(name, args = {}) {
+  return { text: '', toolCalls: [{ id: `${name}-${Math.random().toString(36).slice(2, 8)}`, name, arguments: args }] };
 }
 
 /** Run one objective through the real loop and report what the model saw. */
-async function run(objective, { mode = 'agent', project = null } = {}) {
+async function run(objective, { mode = 'agent', project = null, ...overrides } = {}) {
   const { runTask } = await import(`${SRC}agent/orchestrator.js`);
   const events = [];
 
@@ -92,7 +114,8 @@ async function run(objective, { mode = 'agent', project = null } = {}) {
     {
       id: 'task-1', objective, mode, title: objective.slice(0, 40),
       budget_micros: 100_000, spent_micros: 0, iterations: 0,
-      conversation_id: null, max_iterations: 4
+      conversation_id: null, max_iterations: 4,
+      ...overrides
     },
     {
       project,
@@ -208,4 +231,89 @@ test('a question is answered read-only, with a small toolset', async () => {
   assert.ok(names.length > 0 && names.length <= 6, `a question was sent ${names.length} tools`);
   assert.ok(!names.some(name => /write|delete|run_command|commit|install/.test(name)),
     `a question must not be handed a way to change anything: ${names.join(', ')}`);
+});
+
+// ─── how long a run may go on ───────────────────────────────────────────────
+
+test('a long task is no longer cut off at forty steps', async () => {
+  // Sixty distinct actions: nothing repeats, nothing stalls, and the budget is
+  // ample. The old ceiling stopped this at forty with an apology.
+  const turns = Array.from({ length: 60 }, (_, index) => callTool(`step_${index}`));
+  fresh('Finished the migration.', turns);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, calls: made } = await run('port the whole data layer to Postgres', {
+    project, max_iterations: 60, budget_micros: 5_000_000
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(made.length, 61, `the run stopped after ${made.length} model calls; it was scripted for 61`);
+  assert.equal(result.summary, 'Finished the migration.');
+});
+
+test('a run that cycles without learning anything stops itself', async () => {
+  /*
+     Twelve distinct actions, then the same twelve again, forever.
+
+     Loop detection never fires: no single action repeats often enough inside
+     its window. What is wrong here is subtler — the run is busy and going
+     nowhere, which is the expensive failure mode a step ceiling used to hide.
+  */
+  const cycle = Array.from({ length: 12 }, (_, index) => `look_${index}`);
+  const turns = Array.from({ length: 90 }, (_, index) => callTool(cycle[index % 12]));
+  fresh('Done.', turns);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, calls: made } = await run('work out why the tests are flaky', {
+    project, max_iterations: 90, budget_micros: 5_000_000
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.stopReason, 'stalled', `the run stopped because: ${result.stopReason}`);
+  assert.ok(made.length < 30, `${made.length} model calls before the stall was noticed`);
+  assert.match(result.summary, /without making progress/);
+});
+
+test('a run picked up mid-flight does not start over', async () => {
+  fresh('Continued and finished.');
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { events, calls: made } = await run('finish the billing work', {
+    project,
+    complexity: 'level2',
+    plan: { summary: 'existing plan', steps: [{ title: 'step one', files: [] }] },
+    run_state: {
+      version: 1,
+      iteration: 7,
+      stepIndex: 21,
+      category: 'code',
+      level: 'level2',
+      intent: 'code',
+      checkpointId: 'checkpoint-1',
+      loadedGroups: ['github'],
+      changedFiles: [{ path: 'src/billing.js', kind: 'modified' }],
+      conversation: [
+        { role: 'assistant', content: 'I added the webhook handler.' }
+      ],
+      pendingCalls: [],
+      recentActions: []
+    }
+  });
+
+  const phases = events.filter(event => event.type === 'step').map(event => event.data.phase);
+  assert.ok(!phases.includes('plan'), 'a resumed run must not pay to plan work that is half done');
+  assert.ok(!phases.includes('checkpoint'), 'a second restore point would restore to the middle of the change');
+
+  // The step numbering continues rather than restarting at one.
+  const indexes = events.filter(event => event.type === 'step').map(event => event.data.index);
+  assert.ok(Math.min(...indexes) > 21, `the timeline restarted at step ${Math.min(...indexes)}`);
+
+  // What the run already knew is in front of the model.
+  const sent = JSON.stringify(made.at(-1).messages);
+  assert.match(sent, /I added the webhook handler/);
+  assert.match(sent, /src\/billing\.js/);
+
+  // And the tool group it had already paid to load is still loaded.
+  const names = (made.at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(names.some(name => name.startsWith('github_')), 'the loaded group was dropped on resume');
 });
