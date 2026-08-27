@@ -159,4 +159,93 @@ export const deliverTools = [
   }
 ];
 
+/**
+ * The other direction: a file the user sent in, put where it belongs.
+ *
+ * An upload arrives without a home — it is a logo, not `public/logo.png`.
+ * Deciding where it goes is a judgement about the project, which is exactly
+ * the kind of judgement the agent is for, so the path is an argument rather
+ * than a convention.
+ */
+export const uploadTools = [
+  {
+    name: 'place_upload',
+    risk: RISK.WRITE,
+    description:
+      'Copy a file the user uploaded into the project at a path you choose. Use it when they send an image, ' +
+      'a document or any asset that belongs in the repository — a logo, an icon, a design export, a data file.',
+    schema: t.object({
+      upload: t.string({ required: true, max: 200, description: 'The upload id, or its filename' }),
+      path: t.string({ required: true, max: 400, description: 'Where it belongs, e.g. "public/logo.png"' })
+    }),
+    async run({ upload, path }, ctx) {
+      if (!ctx.projectId) throw badRequest('Open a project before adding files to it.');
+      if (!hasServiceRole()) throw badRequest('Uploads are unavailable on this deployment.');
+      if (isSecretPath(path)) throw forbidden('That destination is reserved for credential files.');
+
+      const client = serviceClient();
+      const looksLikeId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(upload);
+
+      const row = looksLikeId
+        ? await client.from('uploads').select('*').eq('id', upload).eq('org_id', ctx.orgId).first()
+        : await client.from('uploads').select('*').eq('org_id', ctx.orgId).eq('name', safeName(upload))
+            .order('created_at').limit(1).first();
+
+      if (!row) {
+        throw notFound(`No upload named "${upload}". Ask the user to attach it, or list what is available.`);
+      }
+
+      const { getObject } = await import('../../db/storage.js');
+      const content = await getObject(row.storage_key, { bucket: row.bucket });
+      if (!content) throw notFound(`The bytes for "${row.name}" are no longer in storage.`);
+
+      // Binary goes through the filesystem directly: the text write path
+      // would corrupt a PNG on the way through a UTF-8 string.
+      const { resolveInside } = await import('../../exec/workspace.js');
+      const { persistFile } = await import('../../exec/persistence.js');
+      const { writeFile, mkdir } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+
+      const full = await resolveInside(ctx.projectId, path);
+      await mkdir(dirname(full), { recursive: true });
+      await writeFile(full, content);
+      await persistFile(ctx.projectId, path, content);
+
+      await client.from('uploads').eq('id', row.id).update({
+        placed_path: String(path), project_id: ctx.projectId
+      }).catch(() => {});
+
+      ctx.recordFileChange?.(String(path).replace(/^[/\\]+/, ''), 'created');
+
+      return {
+        output: `Placed ${row.name} (${humanSize(content.length)}) at ${path}.`,
+        metadata: { path, bytes: content.length, uploadId: row.id }
+      };
+    }
+  },
+
+  {
+    name: 'list_uploads',
+    risk: RISK.SAFE,
+    description: 'List the files the user has uploaded and not yet placed in the project.',
+    schema: t.object({}),
+    async run(_args, ctx) {
+      if (!hasServiceRole()) return { ok: false, output: 'Uploads are unavailable on this deployment.' };
+
+      const rows = await serviceClient().from('uploads')
+        .select('id,name,content_type,size_bytes,placed_path,created_at')
+        .eq('org_id', ctx.orgId).order('created_at').limit(20).all();
+
+      if (!rows.length) return { output: 'The user has not uploaded anything.' };
+
+      return {
+        output: rows.map(row =>
+          `${row.name}  ${humanSize(row.size_bytes)}  ${row.content_type}` +
+          (row.placed_path ? `  → already at ${row.placed_path}` : '  (not yet placed)')).join('\n'),
+        metadata: { count: rows.length }
+      };
+    }
+  }
+];
+
 export { MAX_DELIVERABLE_BYTES };

@@ -82,11 +82,39 @@ function accountPanel(save) {
   const session = store.state.session;
   const profile = session?.profile || {};
 
+  // A picture is a file people have, not a URL they can produce. Asking for a
+  // link meant uploading it somewhere else first.
+  const avatarImage = h('span.avatar.avatar--lg', profile.avatarUrl
+    ? h('img', { src: profile.avatarUrl, alt: '' })
+    : initials(profile.fullName, session?.user?.email));
+
+  const avatarPicker = h('input', {
+    type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true,
+    onChange: async event => {
+      const [file] = event.target.files || [];
+      event.target.value = '';
+      if (!file) return;
+      try {
+        const { avatarUrl } = await api.upload('/me/avatar', file);
+        mount(avatarImage, h('img', { src: avatarUrl, alt: '' }));
+        const current = store.state.session;
+        if (current) store.set({ session: { ...current, profile: { ...current.profile, avatarUrl } } });
+        toast.success('Profile picture updated.');
+      } catch (error) {
+        toastError(error, 'That picture could not be uploaded');
+      }
+    }
+  });
+
   return h('div.card',
     h('div.row', { style: { gap: 'var(--s-4)', paddingBottom: 'var(--s-5)', borderBottom: '1px solid var(--border)' } },
-      h('span.avatar.avatar--lg', profile.avatarUrl
-        ? h('img', { src: profile.avatarUrl, alt: '' })
-        : initials(profile.fullName, session?.user?.email)),
+      h('button.avatar-edit', {
+        type: 'button',
+        title: 'Change your picture',
+        'aria-label': 'Change your picture',
+        onClick: () => avatarPicker.click()
+      }, avatarImage, h('span.avatar-edit__hint', 'Change')),
+      avatarPicker,
       h('div',
         h('div', { style: { fontSize: 'var(--fs-lg)', fontWeight: '600', color: 'var(--text-strong)' } }, profile.fullName || 'Your name'),
         h('div.subtle', { style: { fontSize: 'var(--fs-sm)' } }, session?.user?.email || ''),
@@ -102,8 +130,17 @@ function accountPanel(save) {
     row('Username', 'Lowercase letters, numbers, dash and underscore.',
       h('input.input', { value: profile.username || '', maxlength: '32', placeholder: 'ada', onInput: e => save({ username: e.target.value.toLowerCase() }) })),
 
-    row('Avatar URL', 'A link to an image, if you would rather not use initials.',
-      h('input.input', { value: profile.avatarUrl || '', maxlength: '500', placeholder: 'https://…', onInput: e => save({ avatarUrl: e.target.value }) })),
+    row('Profile picture', 'PNG, JPEG, WebP or GIF, up to 4MB. Click the picture above to change it.',
+      h('div.row',
+        h('button.btn.btn--sm', { onClick: () => avatarPicker.click() }, 'Upload a picture'),
+        profile.avatarUrl
+          ? h('button.btn.btn--ghost.btn--sm', {
+              onClick: async () => {
+                await save({ avatarUrl: '' });
+                mount(avatarImage, initials(profile.fullName, session?.user?.email));
+              }
+            }, 'Remove')
+          : null)),
 
     row('Timezone', 'Used for scheduling and daily limits.',
       h('input.input', { value: profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone, maxlength: '60', onInput: e => save({ timezone: e.target.value }) })),

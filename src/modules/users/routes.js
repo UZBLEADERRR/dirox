@@ -11,6 +11,7 @@ import { audit } from '../observability/audit.js';
 import { invalidateIdentity } from '../auth/service.js';
 import { forget } from './presence.js';
 import { selectableModels } from '../../ai/catalog.js';
+import { avatarRoute } from '../uploads/routes.js';
 import { getPlanUsage } from '../billing/usage.js';
 
 const aiPreferences = t.object({
@@ -50,6 +51,9 @@ const COLUMN_MAP = {
 
 export function userRoutes() {
   const router = new Router();
+
+  // A profile picture is a file, not a URL, so it has its own upload route.
+  avatarRoute(router);
 
   /**
    * The models this user may choose.

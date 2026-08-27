@@ -16,6 +16,7 @@
 import { h, icon, mount } from '../lib/dom.js';
 import { store } from '../lib/store.js';
 import { api } from '../lib/api.js';
+import { toastError } from '../lib/toast.js';
 
 const MODES = [
   ['agent', 'Agent', 'Plan, edit, test and report'],
@@ -151,15 +152,19 @@ export function createComposer({
 
   const filePicker = h('input', {
     type: 'file',
-    accept: 'image/*,text/*,.log,.txt,.json,.diff,.patch',
+    accept: 'image/*,text/*,.log,.txt,.json,.diff,.patch,.pdf,.zip,.svg,.csv,.yml,.yaml',
     multiple: true,
     hidden: true,
     onChange: event => addAttachments([...event.target.files])
   });
 
   function addAttachments(files) {
-    for (const file of files.slice(0, 4)) {
-      if (file.size > 4 * 1024 * 1024) continue;
+    for (const file of files.slice(0, 6)) {
+      // The server caps this too; refusing here means saying why.
+      if (file.size > 25 * 1024 * 1024) {
+        toastError(new Error(`${file.name} is larger than 25MB`), 'That file is too large to attach');
+        continue;
+      }
       attachments.push(file);
     }
     renderAttachments();
@@ -188,12 +193,17 @@ export function createComposer({
     const text = input.value.trim();
     if (!text || running) return;
 
-    // Attachments are read as text; images are passed through as data URLs.
+    /*
+      Text is read here so it can be inlined; everything else travels as the
+      File itself, to be uploaded. Reading a 20MB PNG into a data URL only to
+      hand it back as bytes is work nobody needs done.
+    */
     const payload = [];
     for (const file of attachments) {
-      const isImage = file.type.startsWith('image/');
-      const content = await (isImage ? readAsDataUrl(file) : file.text());
-      payload.push({ name: file.name, type: isImage ? 'image' : 'text', content });
+      const isText = file.type.startsWith('text/') || /\.(txt|md|json|csv|log|ya?ml|diff|patch|ts|js|py|rb|go|rs|java|sql|html|css)$/i.test(file.name);
+      payload.push(isText
+        ? { name: file.name, type: 'text', content: await file.text(), file }
+        : { name: file.name, type: 'binary', contentType: file.type, file });
     }
 
     input.value = '';
@@ -273,15 +283,6 @@ export function createComposer({
 
     setValue(text) { input.value = text; autoResize(); }
   };
-}
-
-function readAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 export { MODES };

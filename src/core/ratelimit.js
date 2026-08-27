@@ -57,6 +57,9 @@ export const POLICIES = {
   api: { limit: 240, windowMs: 60_000, message: 'Request rate limit reached.' },
   agent: { limit: 20, windowMs: 60_000, message: 'Too many agent runs started. Wait a moment before starting another.' },
   heavy: { limit: 6, windowMs: 60_000, message: 'This operation is rate limited. Try again shortly.' },
+  // Generous: attaching four screenshots to one message is four requests, and
+  // the size cap is the real defence here, not the count.
+  upload: { limit: 60, windowMs: 60_000, message: 'Too many uploads at once. Wait a moment and try again.' },
   webhook: { limit: 120, windowMs: 60_000, message: 'Webhook rate limit reached.' }
 };
 

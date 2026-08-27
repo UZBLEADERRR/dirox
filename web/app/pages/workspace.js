@@ -330,14 +330,38 @@ export async function render({ params, query = {} }) {
     // The welcome screen is replaced by the first real turn.
     thread.querySelector('.chat__welcome')?.remove();
 
-    // Attachments are appended to the objective as labelled context.
+    /*
+      Attachments.
+
+      Text is inlined, because the content is the point and the model can read
+      it. Anything else is uploaded and named: a logo is not something to
+      describe, it is something to put in the repository, and `place_upload`
+      is how the agent does that. Dropping it with an apology — which is what
+      used to happen — made "add this logo" unanswerable.
+    */
     let objective = text;
+    const uploaded = [];
+
     for (const attachment of attachments || []) {
       if (attachment.type === 'text') {
         objective += `\n\nAttached file "${attachment.name}":\n\`\`\`\n${String(attachment.content).slice(0, 20_000)}\n\`\`\``;
-      } else {
-        objective += `\n\n(An image "${attachment.name}" was attached. Images are not yet passed to the model — describe what it shows if it matters.)`;
+        continue;
       }
+
+      try {
+        const { upload } = await api.upload(
+          `/uploads${projectId ? `?projectId=${projectId}` : ''}`, attachment.file);
+        uploaded.push(upload);
+      } catch (error) {
+        toastError(error, `${attachment.name} could not be uploaded`);
+      }
+    }
+
+    if (uploaded.length) {
+      objective += `\n\nUploaded: ${uploaded.map(file => `"${file.name}" (${file.size}, ${file.contentType})`).join(', ')}.`;
+      objective += projectId
+        ? ' Use `place_upload` to put each one where it belongs in the project.'
+        : ' Open a project first if these should be added to a repository.';
     }
 
     thread.appendChild(userMessage(text));

@@ -87,6 +87,32 @@ export const api = {
 
   get(path, options) { return this.request(path, { ...options, method: 'GET' }); },
   post(path, body, options) { return this.request(path, { ...options, method: 'POST', body }); },
+
+  /**
+   * Send a file. The body is the file itself — no multipart envelope, because
+   * there is one field and its name fits in a header.
+   */
+  async upload(path, file, { signal } = {}) {
+    const response = await fetch(`${BASE}/api${path}`, {
+      method: 'POST',
+      signal,
+      credentials: 'include',
+      headers: this.headers({
+        'Content-Type': file.type || 'application/octet-stream',
+        // A filename may hold anything a filesystem allows; a header may not.
+        'X-Upload-Name': encodeURIComponent(file.name || 'upload')
+      }),
+      body: file
+    });
+
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      const error = payload?.error || {};
+      throw new ApiError(error.message || 'The upload failed', { status: response.status, code: error.code });
+    }
+    return payload;
+  },
   put(path, body, options) { return this.request(path, { ...options, method: 'PUT', body }); },
   patch(path, body, options) { return this.request(path, { ...options, method: 'PATCH', body }); },
   delete(path, options) { return this.request(path, { ...options, method: 'DELETE' }); },

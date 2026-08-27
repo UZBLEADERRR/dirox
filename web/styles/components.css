@@ -253,6 +253,25 @@
 .switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
 .switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--n-white); }
 
+/* ── avatar, when it can be changed ─────────────────────────────────────── */
+.avatar-edit { position: relative; border-radius: var(--r-full); display: block; flex: none; }
+.avatar-edit__hint {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 2px 0;
+  border-radius: 0 0 var(--r-full) var(--r-full);
+  background: rgba(0, 0, 0, 0.66);
+  color: var(--n-50);
+  font-size: var(--fs-2xs);
+  text-align: center;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.avatar-edit:hover .avatar-edit__hint,
+.avatar-edit:focus-visible .avatar-edit__hint { opacity: 1; }
+/* Touch has no hover, so the label is simply always there. */
+@media (pointer: coarse) { .avatar-edit__hint { opacity: 1; } }
+
 /* ── surfaces ───────────────────────────────────────────────────────────── */
 .card {
   background: var(--bg-panel);

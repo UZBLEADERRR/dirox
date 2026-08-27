@@ -24,7 +24,8 @@ export const PROJECT_BUCKET = 'project-files';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
-let bucketReady = null;
+/** One promise per bucket: the answer cannot change while we are running. */
+const buckets = new Map();
 
 function base() {
   if (!config.supabase.url || !config.supabase.serviceKey) {
@@ -91,8 +92,10 @@ async function call(path, { method = 'GET', body, headers = {}, raw = false, tim
  * Once per process: the answer cannot change while we are running, and every
  * write would otherwise pay for the check.
  */
-export async function ensureBucket(bucket = PROJECT_BUCKET) {
-  bucketReady ??= (async () => {
+export async function ensureBucket(bucket = PROJECT_BUCKET, { public: isPublic = false } = {}) {
+  if (buckets.has(bucket)) return buckets.get(bucket);
+
+  const ready = (async () => {
     try {
       await call(`/bucket/${encodeURIComponent(bucket)}`);
       return true;
@@ -103,28 +106,29 @@ export async function ensureBucket(bucket = PROJECT_BUCKET) {
     await call('/bucket', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: bucket, name: bucket, public: false })
+      body: JSON.stringify({ id: bucket, name: bucket, public: isPublic })
     }).catch(error => {
       // A concurrent boot may have created it between the check and the create.
       if (error.status !== 409) throw error;
     });
 
-    logger.info('created the project file bucket', { bucket });
+    logger.info('created a storage bucket', { bucket, public: isPublic });
     return true;
   })().catch(error => {
-    bucketReady = null;            // let a later call try again
+    buckets.delete(bucket);        // let a later call try again
     throw error;
   });
 
-  return bucketReady;
+  buckets.set(bucket, ready);
+  return ready;
 }
 
 /**
  * @param {string} key      object key, e.g. "<projectId>/src/index.js"
  * @param {Buffer|string} content
  */
-export async function putObject(key, content, { contentType = 'application/octet-stream', bucket = PROJECT_BUCKET } = {}) {
-  await ensureBucket(bucket);
+export async function putObject(key, content, { contentType = 'application/octet-stream', bucket = PROJECT_BUCKET, public: isPublic } = {}) {
+  await ensureBucket(bucket, { public: isPublic ?? bucket === 'public-assets' });
   const body = Buffer.isBuffer(content) ? content : Buffer.from(String(content), 'utf8');
 
   await call(`/object/${encodeURIComponent(bucket)}/${encodeKey(key)}`, {

@@ -17,6 +17,7 @@ import { billingRoutes } from './modules/billing/routes.js';
 import { projectRoutes } from './modules/projects/routes.js';
 import { githubRoutes } from './modules/projects/github.routes.js';
 import { deliverableRoutes } from './modules/projects/deliverables.routes.js';
+import { uploadRoutes } from './modules/uploads/routes.js';
 import { adminRoutes } from './modules/admin/routes.js';
 import { taskRoutes } from './modules/agent/task.routes.js';
 import { conversationRoutes } from './modules/agent/conversation.routes.js';
@@ -41,6 +42,7 @@ export function registerRoutes(router) {
   api.use('/projects', projectRoutes());
   api.use('/github', githubRoutes());
   api.use('/deliverables', deliverableRoutes());
+  api.use('/uploads', uploadRoutes());
   api.use('/tasks', taskRoutes());
   api.use('/conversations', conversationRoutes());
   api.use('/search', searchRoutes());
