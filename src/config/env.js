@@ -69,6 +69,20 @@ export const config = {
     webhookSecret: env.STRIPE_WEBHOOK_SECRET || ''
   },
 
+  /**
+   * Web search.
+   *
+   * All optional. Without any of them the agent still searches, through
+   * DuckDuckGo's free HTML endpoint — which works and can be throttled, so a
+   * deployment that depends on search should buy a key.
+   */
+  search: {
+    braveKey: env.BRAVE_SEARCH_API_KEY || '',
+    tavilyKey: env.TAVILY_API_KEY || '',
+    serperKey: env.SERPER_API_KEY || '',
+    enabled: bool(env.WEB_SEARCH_ENABLED, true)
+  },
+
   sandbox: {
     enabled: bool(env.SANDBOX_ENABLED, true),
     workspaceRoot: env.WORKSPACE_ROOT || '/tmp/diroxcode-workspaces',

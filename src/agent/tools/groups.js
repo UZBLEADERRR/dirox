@@ -67,6 +67,10 @@ export const TOOL_GROUPS = {
     summary: 'Remembering decisions and conventions across tasks, and recalling them.',
     tools: ['remember', 'recall']
   },
+  web: {
+    summary: 'The public internet: search for something, and read a page or a JSON endpoint. Use it when the answer is newer than your training or specific to a library, error or API you cannot see here.',
+    tools: ['web_search', 'web_fetch']
+  },
   security: {
     summary: 'Scanning the workspace for committed credentials.',
     tools: ['secret_scan']
@@ -94,7 +98,10 @@ const HINTS = [
   [/\bzip\b|download|export|send me|\bapk\b|\bpdf\b|upload|logo|attach/i, 'delivery'],
   [/\bbuild\b|\bcompile|dependenc|\binstall\b|\bnpm i\b|lint/i, 'build'],
   [/\bpreview|screenshot|render|browser|\bpage\b|\bUI\b|looks?\b/i, 'preview'],
-  [/\bsecret|credential|leak|\.env\b/i, 'security']
+  [/\bsecret|credential|leak|\.env\b/i, 'security'],
+  // A task that names the outside world will need the outside world on its
+  // first step; making it ask for the group is a wasted round trip.
+  [/\bsearch\b|\bgoogle\b|look ?up|latest|documentation|\bdocs\b|changelog|release notes|https?:\/\/|\bAPI\b|\bweb\b/i, 'web']
 ];
 
 /**
