@@ -2,8 +2,10 @@
  * Terminal, test, build and dependency tools.
  *
  * Every one of these goes through the sandbox, which means every one is
- * allowlist-checked and shell-free. The test and build tools use the project's
- * own configured commands rather than guessing.
+ * allowlist-checked per segment. Composition is allowed because a build is
+ * composition; substitution is not, because it hides what will run. The test
+ * and build tools use the project's own configured commands rather than
+ * guessing.
  */
 
 import { t } from '../../core/validate.js';
@@ -43,10 +45,13 @@ export const terminalTools = [
     name: 'execute_command',
     risk: RISK.WRITE,
     description:
-      'Run a single command in the project workspace. No shell features: no pipes, redirection, chaining or substitution. ' +
-      'Only allowlisted executables run.',
+      'Run a command in the project workspace. Chaining, pipes and redirection work: ' +
+      '`npm run build && npm test`, `npm test 2>&1 | tail -40`, `ls x 2>/dev/null || echo missing`. ' +
+      'Substitution does not: no $(...), no backticks, and no inline programs such as `node -e`. ' +
+      'Every executable in the line must be allowlisted and nothing may write outside the workspace. ' +
+      'To script something, write the script to a file and run the file.',
     schema: t.object({
-      command: t.string({ required: true, max: 500, description: 'One command, e.g. "npm run lint"' }),
+      command: t.string({ required: true, max: 2000, description: 'e.g. "npm run build && npm test"' }),
       cwd: t.string({ max: 300, description: 'Optional subdirectory to run in' }),
       timeoutSeconds: t.integer({ min: 5, max: 600, default: 120 })
     }),
