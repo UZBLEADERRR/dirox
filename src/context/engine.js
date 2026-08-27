@@ -68,7 +68,7 @@ export async function assembleContext(request) {
   if (tier === 'minimal') {
     const messages = [
       { role: 'system', content: systemPrompt({ tier: 'minimal' }) },
-      ...compressHistory(history.slice(-historyTurns), historyTurns, historyChars),
+      ...compressHistory(history.slice(-historyTurns), { keepRecent: historyTurns, maxChars: historyChars }),
       { role: 'user', content: String(objective) }
     ];
     return {
@@ -154,7 +154,8 @@ export async function assembleContext(request) {
     messages.push(message);
   }
 
-  const trimmedHistory = compressHistory(history, historyTurns, historyChars);
+  const trimmedHistory = compressHistory(history, { keepRecent: historyTurns, maxChars: historyChars });
+  markSettledPrefix(trimmedHistory);
   messages.push(...trimmedHistory);
 
   // The volatile layer travels late, below the cache boundary, precisely
@@ -199,26 +200,86 @@ function buildUserTurn(objective, mode) {
 }
 
 /**
+ * A second cache breakpoint, inside the conversation.
+ *
+ * The system layer and the tool schemas cache well because they do not change.
+ * History is now the larger cost and it changes constantly — but only at the
+ * end. Older turns are settled: a digested tool result stays digested, and a
+ * turn from six steps ago will never be rewritten.
+ *
+ * So the settled part can be cached too. The boundary advances in strides
+ * rather than on every call, because moving it means writing the cache again
+ * and a write costs more than a read: one write buys three reads at a tenth
+ * of the price, instead of paying a premium every single call.
+ */
+const CACHE_STRIDE = 4;
+const SETTLED_MARGIN = 6;
+
+export function markSettledPrefix(messages, { stride = CACHE_STRIDE, margin = SETTLED_MARGIN } = {}) {
+  const settled = messages.length - margin;
+  if (settled < stride) return null;
+
+  // Round down to a stride boundary so the same position is chosen for
+  // several calls in a row.
+  const index = Math.floor(settled / stride) * stride - 1;
+  if (index < 0 || index >= messages.length) return null;
+
+  // A tool result is not a boundary: it must stay adjacent to the call that
+  // produced it, and adapters group the two.
+  if (messages[index].role === 'tool') return null;
+
+  messages[index].cacheBoundary = true;
+  return index;
+}
+
+/**
  * Compress conversation history.
  *
- * Recent turns are kept verbatim because they carry the working state. Older
- * turns collapse into a single summary line each — enough to preserve intent
+ * Two things happen here, and the second is where the money is.
+ *
+ * Older turns collapse into a summary line each — enough to preserve intent
  * without re-sending code that is already in the retrieved context.
  *
- * `maxChars` caps each surviving turn. Counting turns alone is not a bound:
- * one earlier message containing a pasted stack trace makes the next greeting
- * cost more than the whole conversation before it.
+ * And tool results are digested. Inside an agent loop every previous tool
+ * result is re-sent on every call, so a run that reads six files pays for the
+ * first one sixteen times. The most recent few are kept verbatim because the
+ * model is still working from them; older ones become a line saying what ran
+ * and how it ended. If it turns out the body was needed after all, reading the
+ * file again costs one call instead of fifteen.
+ *
+ * The tool-call structure is preserved throughout. It used to be flattened —
+ * an assistant turn lost its `tool_calls` and a result became an anonymous
+ * user message — which left the model unable to tell which call produced
+ * which output.
+ *
+ * @param {Array} history
+ * @param {{keepRecent?:number, maxChars?:number, verbatimToolResults?:number}} options
  */
-export function compressHistory(history, keepRecent = 10, maxChars = 0) {
-  const keep = turn => normaliseTurn(turn, maxChars);
+export function compressHistory(history, { keepRecent = 10, maxChars = 0, verbatimToolResults = 3 } = {}) {
+  // Index the tool results from the end, so "the last three" is a fact about
+  // the conversation rather than about where a turn happens to sit.
+  const toolAge = new Map();
+  let seen = 0;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    if (history[index]?.role === 'tool') { toolAge.set(index, seen); seen += 1; }
+  }
+
+  const keep = (turn, index) => normaliseTurn(turn, {
+    maxChars,
+    digest: turn.role === 'tool' && (toolAge.get(index) ?? 0) >= verbatimToolResults
+  });
+
   if (history.length <= keepRecent) return history.map(keep);
 
-  const older = history.slice(0, history.length - keepRecent);
-  const recent = history.slice(-keepRecent);
+  const offset = history.length - keepRecent;
+  const older = history.slice(0, offset);
+  const recent = history.slice(offset);
 
   const summary = older
     .map(turn => {
+      if (turn.role === 'tool') return `Tool ${turn.name || ''}: ${digestToolOutput(turn.content)}`;
       const text = String(turn.content || '').replace(/```[\s\S]*?```/g, '[code]').replace(/\s+/g, ' ').trim();
+      if (!text) return null;
       return `${turn.role === 'user' ? 'User' : 'Assistant'}: ${text.slice(0, 160)}`;
     })
     .filter(Boolean)
@@ -226,19 +287,52 @@ export function compressHistory(history, keepRecent = 10, maxChars = 0) {
     .join('\n');
 
   return [
-    { role: 'system', content: `Earlier in this conversation:\n${summary}` },
-    ...recent.map(keep)
+    ...(summary ? [{ role: 'system', content: `Earlier in this conversation:\n${summary}` }] : []),
+    ...recent.map((turn, index) => keep(turn, offset + index))
   ];
 }
 
-function normaliseTurn(turn, maxChars = 0) {
+/**
+ * A tool result, in one line.
+ *
+ * The head and the tail: the head says what it was, the tail says how it
+ * ended, and the middle of a file the model has already read is the part it
+ * does not need again.
+ */
+export function digestToolOutput(output, maxChars = 200) {
+  const text = String(output ?? '').trim();
+  if (!text) return '(no output)';
+  if (text.length <= maxChars) return text.replace(/\s+/g, ' ');
+
+  const lines = text.split('\n');
+  const head = lines[0].slice(0, 120);
+  const tail = lines.length > 1 ? lines[lines.length - 1].slice(0, 60) : '';
+
+  return `${head}${tail && tail !== head ? ` … ${tail}` : ' …'} [${lines.length} lines, ${text.length} chars — read again if you need the body]`;
+}
+
+function normaliseTurn(turn, { maxChars = 0, digest = false } = {}) {
   const content = String(turn.content ?? '');
-  return {
-    role: turn.role === 'assistant' ? 'assistant' : turn.role === 'system' ? 'system' : 'user',
-    content: maxChars > 0 && content.length > maxChars
+
+  const body = digest
+    ? digestToolOutput(content)
+    : maxChars > 0 && content.length > maxChars
       ? `${content.slice(0, maxChars)}\n… (${content.length - maxChars} characters trimmed)`
-      : content
-  };
+      : content;
+
+  // A tool result must stay a tool result: it is what pairs with the call that
+  // produced it, and the provider adapters rely on that pairing.
+  if (turn.role === 'tool') {
+    return { role: 'tool', tool_call_id: turn.tool_call_id, name: turn.name, content: body };
+  }
+
+  if (turn.role === 'assistant') {
+    return turn.tool_calls?.length
+      ? { role: 'assistant', content: body, tool_calls: turn.tool_calls }
+      : { role: 'assistant', content: body };
+  }
+
+  return { role: turn.role === 'system' ? 'system' : 'user', content: body };
 }
 
 /**

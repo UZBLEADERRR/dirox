@@ -60,7 +60,11 @@ export function buildRequest({ model, messages, tools, temperature, maxTokens, s
       conversation.push({ role: 'assistant', content: blocks });
       continue;
     }
-    conversation.push({ role: message.role === 'assistant' ? 'assistant' : 'user', content: String(message.content ?? '') });
+    conversation.push({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message.content ?? ''),
+      ...(message.cacheBoundary ? { cacheBoundary: true } : {})
+    });
   }
 
   // Mark the end of the stable prefix cacheable. Tools and the system layer are
@@ -69,6 +73,31 @@ export function buildRequest({ model, messages, tools, temperature, maxTokens, s
   if (cacheSystem && model.supports_prompt_cache && system.length) {
     system[boundaryIndex >= 0 ? boundaryIndex : system.length - 1].cache_control = { type: 'ephemeral' };
   }
+
+  /*
+     A second breakpoint, inside the conversation.
+
+     Tools and the system layer cache because they do not change. In an agent
+     loop the history is the larger cost, and its older half does not change
+     either — so the settled prefix is cached as well. The caller decides where
+     that ends; it moves in strides, because writing a cache costs more than
+     reading one.
+  */
+  if (cacheSystem && model.supports_prompt_cache) {
+    for (const message of conversation) {
+      if (!message.cacheBoundary) continue;
+      const content = typeof message.content === 'string'
+        ? [{ type: 'text', text: message.content }]
+        : message.content;
+      if (!content.length) continue;
+
+      content[content.length - 1].cache_control = { type: 'ephemeral' };
+      message.content = content;
+      delete message.cacheBoundary;
+    }
+  }
+
+  for (const message of conversation) delete message.cacheBoundary;
 
   const body = {
     model: model.code,

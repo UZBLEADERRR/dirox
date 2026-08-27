@@ -161,8 +161,39 @@ test('a real request still gets the whole pipeline', async () => {
   const phases = events.filter(event => event.type === 'step').map(event => event.data.phase);
   assert.ok(phases.includes('retrieve'), 'a change needs context');
 
+  // A coding task carries the core set, not everything. The measurement that
+  // prompted this: on a sixteen-step run, schemas were half the input tokens
+  // and forty-one of the forty-nine tools were never called.
   const modelCall = made.at(-1);
-  assert.ok(modelCall.tools?.length > 10, `a coding task was sent ${modelCall.tools?.length ?? 0} tools`);
+  const names = (modelCall.tools || []).map(tool => tool.function?.name ?? tool.name);
+
+  for (const required of ['read_file', 'edit_file', 'execute_command', 'search_code']) {
+    assert.ok(names.includes(required), `a coding task needs ${required} without asking`);
+  }
+  assert.ok(names.includes('load_tools'), 'and a way to reach everything else');
+  assert.ok(names.length < 16, `${names.length} tools travelled; the core set is meant to be small`);
+});
+
+test('the objective decides what is loaded before the first call', async () => {
+  fresh('Done.');
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('open a pull request for the rate limiting branch', { project });
+
+  const names = (made.at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(names.includes('github_open_pull_request'),
+    'a task that says "pull request" should not spend a round trip asking for GitHub');
+});
+
+test('a task that needs nothing extra carries nothing extra', async () => {
+  fresh('Done.');
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('rename the helper in src/util.js', { project });
+
+  const names = (made.at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(!names.some(name => name.startsWith('github_')), 'no GitHub tools were asked for');
+  assert.ok(!names.some(name => name.startsWith('supabase_')), 'no database tools were asked for');
 });
 
 test('a question is answered read-only, with a small toolset', async () => {

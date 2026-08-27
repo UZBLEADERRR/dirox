@@ -17,6 +17,8 @@ import { gitTools } from './git.js';
 import { githubTools, GITHUB_TOOL_NAMES } from './github.js';
 import { deliverTools, uploadTools } from './deliver.js';
 import { supabaseTools, SUPABASE_TOOL_NAMES } from './supabase.js';
+import { loaderTools } from './loader.js';
+import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
 import { parse, toJsonSchema } from '../../core/validate.js';
@@ -29,7 +31,8 @@ import { logger } from '../../core/logger.js';
 
 const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
-  ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools
+  ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
+  ...loaderTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -71,11 +74,12 @@ const TOOLSETS = {
 /**
  * @param {{mode?:string, intent?:string, toolset?:string, featureFlags?:object,
  *          hasRepository?:boolean, hasDevCommand?:boolean, hasGitHub?:boolean,
- *          hasSupabase?:boolean, includeGitHub?:boolean}} options
+ *          hasSupabase?:boolean, includeGitHub?:boolean, loadedGroups?:Set<string>}} options
  */
 export function toolsFor({
   mode = 'agent', toolset, featureFlags = {}, includeGitHub = false,
-  hasRepository = false, hasDevCommand = false, hasGitHub = true, hasSupabase = false
+  hasRepository = false, hasDevCommand = false, hasGitHub = true, hasSupabase = false,
+  loadedGroups = new Set()
 } = {}) {
   // The intent profile decides first: it can refuse tools outright, which no
   // amount of later filtering can do as cheaply.
@@ -119,7 +123,39 @@ export function toolsFor({
     tools = tools.filter(tool => !PREVIEW_TOOL_NAMES.has(tool.name));
   }
 
+  /*
+     Progressive disclosure.
+
+     Measured on a sixteen-step run: schemas were 75,776 of 150,744 input
+     tokens, and forty-one of the forty-nine tools were never called. So the
+     core travels and the rest is fetched by name — one round trip, once, only
+     when a group is genuinely needed.
+
+     `loadedGroups` is what the run has already asked for. An explicit
+     `toolset` is a narrower instrument and wins outright: a read-only
+     question should not be handed a loader either.
+  */
+  if (toolset === 'full' || !toolset) {
+    const carried = new Set([...CORE_TOOLS, ...toolNamesForGroups([...loadedGroups])]);
+    tools = tools.filter(tool => carried.has(tool.name) || !GROUPED_TOOL_NAMES.has(tool.name));
+  } else {
+    // A named toolset has no loader: it is deliberately fixed.
+    tools = tools.filter(tool => tool.name !== 'load_tools');
+  }
+
   return tools;
+}
+
+/**
+ * Which groups can be loaded at all on this task.
+ *
+ * A group whose tools are all filtered out — GitHub without a connection,
+ * preview without a dev server — must not be offered, or the model spends a
+ * call discovering it does not exist.
+ */
+export function availableGroups(options = {}) {
+  const permitted = new Set(toolsFor({ ...options, toolset: 'full', loadedGroups: new Set(GROUP_NAMES) }).map(tool => tool.name));
+  return new Set(GROUP_NAMES.filter(name => TOOL_GROUPS[name].tools.some(tool => permitted.has(tool))));
 }
 
 /** The tool definitions sent to the model. */

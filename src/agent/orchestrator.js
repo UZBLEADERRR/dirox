@@ -22,7 +22,8 @@ import { systemSetting } from '../ai/catalog.js';
 import { assembleContext } from '../context/engine.js';
 import { TokenBudget, defaultBudgetFor } from '../context/budget.js';
 import { plannerPrompt } from './prompts.js';
-import { toolsFor, toolDefinitions, executeTool } from './tools/index.js';
+import { toolsFor, toolDefinitions, executeTool, availableGroups } from './tools/index.js';
+import { groupsFor } from './tools/groups.js';
 import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
@@ -65,7 +66,9 @@ export async function runTask(task, options) {
     checkpointed: false,
     checkpointId: null,
     conversation: [],
-    deliverables: []
+    deliverables: [],
+    /** Tool groups this run has pulled in, beyond the core set. */
+    loadedGroups: new Set()
   };
 
   const recordFileChange = (path, kind) => {
@@ -359,7 +362,15 @@ export async function runTask(task, options) {
     // ── 5. the loop ──────────────────────────────────────────────────────────
     await updateTask(task.id, { status: 'running' });
 
-    const tools = toolsFor({
+    /*
+       Tools are no longer fixed for the run.
+
+       The core set travels on every call; the rest is fetched by name when a
+       step needs it. What the objective already asks for is loaded up front —
+       a task that says "open a pull request" will need GitHub on its first
+       step, and making it ask would waste a call in both directions.
+    */
+    const toolOptions = {
       mode: task.mode,
       toolset: intent.profile.toolset,
       featureFlags: options.featureFlags || {},
@@ -368,7 +379,17 @@ export async function runTask(task, options) {
       hasGitHub: options.hasGitHub !== false,
       hasSupabase: options.hasSupabase === true,
       includeGitHub: intent.profile.github === true
-    });
+    };
+
+    const groupsAvailable = availableGroups(toolOptions);
+    for (const group of groupsFor(task.objective)) {
+      if (groupsAvailable.has(group)) state.loadedGroups.add(group);
+    }
+
+    let tools = toolsFor({ ...toolOptions, loadedGroups: state.loadedGroups });
+    if (state.loadedGroups.size) {
+      emit('notice', { level: 'info', message: `Loaded tools: ${[...state.loadedGroups].join(', ')}.` });
+    }
 
     const maxIterations = Math.min(Number(task.max_iterations) || defaults.max_iterations, 40);
     let iteration = 0;
@@ -383,6 +404,12 @@ export async function runTask(task, options) {
         finalText = finalText || 'The task budget was used up before the work could be finished.';
         emit('notice', { level: 'warning', message: 'Budget exhausted — stopping to avoid further spend.' });
         break;
+      }
+
+      // A group loaded on the previous step becomes available on this one.
+      if (state.toolsDirty) {
+        tools = toolsFor({ ...toolOptions, loadedGroups: state.loadedGroups });
+        state.toolsDirty = false;
       }
 
       const limits = await budget.limits({ model: currentRoute.model, level: classification.level });
@@ -516,6 +543,11 @@ export async function runTask(task, options) {
           toolOutputLimit: limits.toolOutputChars,
           recordFileChange,
           beforeFileChange,
+          // The loader records; the loop applies. A tool cannot widen the
+          // request it is already running inside.
+          loadedGroups: state.loadedGroups,
+          availableGroups: groupsAvailable,
+          loadGroup: group => { state.loadedGroups.add(group); state.toolsDirty = true; },
           // A file the user can save is worth its own event: the chat shows it
           // as soon as it exists rather than only in the closing summary.
           onDeliverable: file => {
