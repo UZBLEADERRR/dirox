@@ -27,6 +27,7 @@ import { groupsFor } from './tools/groups.js';
 import { packRunState, unpackRunState, trimConversation } from './runstate.js';
 import { runSubAgent } from './subagent.js';
 import { planBatch } from './parallel.js';
+import { orientation } from './orientation.js';
 import { createCheckpoint, captureOriginal } from './checkpoints.js';
 import { reviewChange, summariseFindings } from './review.js';
 import { serviceClient, hasServiceRole } from '../db/supabase.js';
@@ -377,6 +378,30 @@ export async function runTask(task, options) {
       });
     }
 
+    /*
+       What the repository is, worked out rather than asked about.
+
+       The first thing an agent does on a coding task is find out where it is:
+       `inspect_project`, or a directory listing, or `git status`. None of that
+       is a judgement — it is `ls`, a manifest and a branch name — and paying a
+       whole iteration for it (a model call carrying every tool schema, a tool
+       round trip, then another model call to use the answer) is paying a model
+       to run code.
+
+       So the run establishes it first, for a few hundred tokens, once.
+    */
+    const brief = project && intent.intent === 'code'
+      ? await orientation(project.id).catch(() => null)
+      : null;
+
+    if (brief) {
+      emit('step', {
+        index: ++state.stepIndex, phase: PHASES.RETRIEVE,
+        title: 'Looking around the project', status: 'completed',
+        summary: 'Established the project layout and state without a model call'
+      });
+    }
+
     // ── 4. plan, for anything non-trivial ────────────────────────────────────
     // A resumed run keeps the plan it was working to. Planning again would
     // cost a model call to produce a plan for work that is already half done.
@@ -396,9 +421,14 @@ export async function runTask(task, options) {
         });
 
         const result = await complete({
-          messages: [...context.messages.filter(m => m.role === 'system'), ...plannerPrompt(task.objective, {
-            fileCount: context.retrieval.files.length, mode: task.mode
-          })],
+          messages: [
+            ...context.messages.filter(m => m.role === 'system'),
+            // The planner plans better knowing what it is planning inside.
+            ...(brief ? [{ role: 'system', content: brief }] : []),
+            ...plannerPrompt(task.objective, {
+              fileCount: context.retrieval.files.length, mode: task.mode
+            })
+          ],
           routeResult: planRoute,
           temperature: 0.1,
           maxTokens: Math.min(2000, limits.outputTokens),
@@ -727,7 +757,7 @@ export async function runTask(task, options) {
           projectId: project?.id,
           orgId: auth.org.id,
           userId: auth.user.id,
-          objective: buildObjective(task, plan, state, priorIterations + iteration),
+          objective: buildObjective(task, plan, state, priorIterations + iteration, brief),
           mode: task.mode,
           limits,
           history: state.conversation,
@@ -1049,10 +1079,14 @@ async function recentTurns(conversationId, limit = 4) {
 }
 
 /** The objective the model sees, sharpened by the plan and what has happened. */
-function buildObjective(task, plan, state, iteration) {
+function buildObjective(task, plan, state, iteration, brief = null) {
   if (iteration === 1) {
-    if (!plan?.steps?.length) return task.objective;
-    return `${task.objective}\n\nPlan:\n${plan.steps.map((step, i) => `${i + 1}. ${step.title}`).join('\n')}`;
+    // The orientation brief travels on the first step only. After that the
+    // conversation carries what the run has learned, and repeating the layout
+    // on every call would be paying for the same paragraph forty times.
+    const opening = [task.objective, brief].filter(Boolean).join('\n\n');
+    if (!plan?.steps?.length) return opening;
+    return `${opening}\n\nPlan:\n${plan.steps.map((step, i) => `${i + 1}. ${step.title}`).join('\n')}`;
   }
 
   const changed = [...state.changedFiles.values()];
