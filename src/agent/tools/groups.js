@@ -71,6 +71,10 @@ export const TOOL_GROUPS = {
     summary: 'The public internet: search for something, and read a page or a JSON endpoint. Use it when the answer is newer than your training or specific to a library, error or API you cannot see here.',
     tools: ['web_search', 'web_fetch']
   },
+  automation: {
+    summary: 'Work that runs later on its own: set up a schedule, see what is already scheduled.',
+    tools: ['create_schedule', 'list_schedules']
+  },
   security: {
     summary: 'Scanning the workspace for committed credentials.',
     tools: ['secret_scan']
@@ -101,7 +105,8 @@ const HINTS = [
   [/\bsecret|credential|leak|\.env\b/i, 'security'],
   // A task that names the outside world will need the outside world on its
   // first step; making it ask for the group is a wasted round trip.
-  [/\bsearch\b|\bgoogle\b|look ?up|latest|documentation|\bdocs\b|changelog|release notes|https?:\/\/|\bAPI\b|\bweb\b/i, 'web']
+  [/\bsearch\b|\bgoogle\b|look ?up|latest|documentation|\bdocs\b|changelog|release notes|https?:\/\/|\bAPI\b|\bweb\b/i, 'web'],
+  [/\bschedule|every (day|week|month|morning|monday|hour)|\bcron\b|\bdaily\b|\bweekly\b|\bnightly\b|automat|recurring|periodic/i, 'automation']
 ];
 
 /**

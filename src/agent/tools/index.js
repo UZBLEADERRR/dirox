@@ -23,6 +23,7 @@ import { planTools, PLAN_TOOL_NAMES } from './plan.js';
 import { webTools, WEB_TOOL_NAMES } from './web.js';
 import { screenshotTools } from './screenshot.js';
 import { skillTools, SKILL_TOOL_NAMES } from './skill.js';
+import { scheduleTools, SCHEDULE_TOOL_NAMES } from './schedule.js';
 import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
@@ -38,7 +39,8 @@ import { logger } from '../../core/logger.js';
 const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
   ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
-  ...loaderTools, ...delegateTools, ...planTools, ...webTools, ...screenshotTools, ...skillTools
+  ...loaderTools, ...delegateTools, ...planTools, ...webTools, ...screenshotTools, ...skillTools,
+  ...scheduleTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -142,6 +144,9 @@ export function toolsFor({
   // call by guessing a name.
   if (!hasSkills) {
     tools = tools.filter(tool => !SKILL_TOOL_NAMES.has(tool.name));
+  }
+  if (featureFlags.schedules === false) {
+    tools = tools.filter(tool => !SCHEDULE_TOOL_NAMES.has(tool.name));
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));

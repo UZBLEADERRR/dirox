@@ -20,6 +20,7 @@ import { materialiseWorkspace, snapshotWorkspace } from '../../exec/persistence.
 import { config } from '../../config/env.js';
 import { invalidatePlanUsage } from '../billing/usage.js';
 import { TRUST } from '../../agent/permissions.js';
+import { recordSuccess } from '../../queue/scheduler.js';
 
 /** Has this user connected GitHub, and can the deployment talk to it at all? */
 async function githubConnected(userId) {
@@ -201,6 +202,10 @@ async function afterRun(task, result, auth) {
   const succeeded = result.status === 'completed';
   const changed = result.changedFiles?.length ?? 0;
 
+  // A schedule needs to know how its last run went, or it cannot decide to
+  // stop after failing repeatedly.
+  if (task.schedule_id) await recordSuccess(task.schedule_id, task.id, result.status).catch(() => {});
+
   await notify({
     userId: task.user_id,
     orgId: task.org_id,
@@ -236,7 +241,7 @@ async function updateTask(taskId, patch) {
  * Background agent runs go through the queue, so a long autopilot task survives
  * the browser closing and does not hold an HTTP connection open.
  */
-registerHandler('agent.run', async ({ taskId, trust, allowedTiers, preferredModelId, autoTest }) => {
+registerHandler('agent.run', async ({ taskId, trust, allowedTiers, preferredModelId, autoTest, confirmPlan }) => {
   const client = serviceClient();
   const task = await client.from('tasks').select('*').eq('id', taskId).first();
   if (!task) throw notFound('Task not found');
@@ -257,7 +262,7 @@ registerHandler('agent.run', async ({ taskId, trust, allowedTiers, preferredMode
   };
 
   const result = await startTask(task, {
-    project, auth, trust, allowedTiers, preferredModelId, autoTest
+    project, auth, trust, allowedTiers, preferredModelId, autoTest, confirmPlan
   });
 
   return { status: result.status, changedFiles: result.changedFiles?.length ?? 0 };

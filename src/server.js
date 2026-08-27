@@ -18,6 +18,7 @@ import { migrate } from './db/migrate.js';
 import './modules/projects/service.js';
 import './modules/agent/runner.js';
 import { startMaintenance } from './queue/maintenance.js';
+import { startScheduler } from './queue/scheduler.js';
 
 /**
  * Apply pending migrations before serving.
@@ -102,6 +103,7 @@ const workerEnabled = process.env.WORKER_ENABLED !== 'false';
 if (workerEnabled) {
   startWorker();
   startMaintenance();
+  startScheduler();
 }
 
 let shuttingDown = false;

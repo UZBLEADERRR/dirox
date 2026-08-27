@@ -63,7 +63,7 @@ declare
     'usage_records','usage_daily','ai_cache','eval_suites','eval_runs','api_keys',
     'user_sessions','audit_logs','notifications','feature_flags','rate_limits',
     'invoices','payments','webhook_events','jobs','system_settings','system_events',
-    'user_integrations','deliverables','uploads'
+    'user_integrations','deliverables','uploads','schedules'
   ];
 begin
   foreach t in array expected_tables loop

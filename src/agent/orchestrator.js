@@ -674,6 +674,8 @@ export async function runTask(task, options) {
         orgId: auth.org.id,
         userId: auth.user.id,
         taskId: task.id,
+        // Read by the permission check, and by `create_schedule`: a schedule
+        // must never be able to run at a higher trust than the run making it.
         trust: options.trust,
         mode: task.mode,
         role: auth.role,
