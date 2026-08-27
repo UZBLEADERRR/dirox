@@ -19,6 +19,7 @@ const TABS = [
   ['account', 'Account'],
   ['developer', 'Developer'],
   ['ai', 'AI behaviour'],
+  ['automation', 'Automation'],
   ['usage', 'Usage'],
   ['billing', 'Billing'],
   ['security', 'Security'],
@@ -669,6 +670,180 @@ async function securityPanel() {
   return container;
 }
 
+
+/**
+ * Automations.
+ *
+ * A schedule is a task waiting for a time, so the form asks for the same
+ * things a task does plus when. Two of them earn their place:
+ *
+ *   The preview. A weekly schedule that turns out to be daily is expensive,
+ *   and cron is famously easy to mean the opposite of. Showing the next five
+ *   runs before it is saved is cheaper than finding out on the bill.
+ *
+ *   The trust picker, which is the only field here that is a security
+ *   decision. Nobody is present when this runs, so what it may do without
+ *   asking is chosen once, deliberately, by a person.
+ */
+function automationPanel() {
+  const container = h('div.stack');
+
+  const listCard = h('div.card', h('div.skeleton', { style: { height: '120px' } }));
+
+  const fields = {
+    name: h('input.input', { placeholder: 'Weekly dependency check' }),
+    objective: h('textarea.input', {
+      rows: '3',
+      placeholder: 'Check every dependency for a newer version. Open a pull request for the safe ones and list the rest.'
+    }),
+    cron: h('input.input.input--mono', { placeholder: '0 9 * * mon', value: '0 9 * * mon' }),
+    timezone: h('input.input', { placeholder: 'Asia/Tashkent', value: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
+    project: h('select.select'),
+    mode: h('select.select', [['agent', 'Agent'], ['ask', 'Ask'], ['review', 'Review'], ['debug', 'Debug'], ['autopilot', 'Autopilot']]
+      .map(([value, label]) => h('option', { value }, label))),
+    trust: h('select.select', [
+      ['safe', 'Ask before any change'],
+      ['confirm', 'Edit files, ask for anything riskier'],
+      ['autonomous', 'Edit and install without asking']
+    ].map(([value, label]) => h('option', { value }, label)))
+  };
+  fields.trust.value = 'confirm';
+
+  const preview = h('p.subtle', { style: { fontSize: 'var(--fs-xs)', minHeight: '2.4em' } },
+    'Enter a schedule to see when it would run.');
+
+  /** What this expression actually means, from the server that will run it. */
+  let previewTimer = null;
+  const refreshPreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      try {
+        const result = await api.post('/schedules/preview', {
+          cron: fields.cron.value.trim(),
+          timezone: fields.timezone.value.trim() || 'UTC'
+        });
+        mount(preview,
+          h('span', { style: { color: 'var(--text)' } }, result.description),
+          h('br'),
+          `Next: ${result.nextRuns.slice(0, 3).map(when => new Date(when).toLocaleString()).join(' · ')}`);
+      } catch (error) {
+        mount(preview, h('span', { style: { color: 'var(--danger)' } }, error.message));
+      }
+    }, 250);
+  };
+  fields.cron.addEventListener('input', refreshPreview);
+  fields.timezone.addEventListener('input', refreshPreview);
+
+  async function load() {
+    try {
+      const { schedules } = await api.get('/schedules');
+      renderList(schedules);
+    } catch (error) {
+      mount(listCard, h('p.field__error', error.message));
+    }
+  }
+
+  function renderList(schedules) {
+    if (!schedules.length) {
+      return mount(listCard,
+        h('div.empty',
+          h('div.empty__title', 'Nothing runs on its own yet'),
+          h('p.empty__body', 'A schedule runs a task at a set time with nobody watching — a weekly dependency check, a nightly report, a morning triage.')));
+    }
+
+    mount(listCard, h('div.schedules', schedules.map(schedule =>
+      h('div.schedule', { 'data-enabled': String(schedule.enabled) },
+        h('div.schedule__what',
+          h('div.schedule__name', schedule.name),
+          h('div.schedule__when', schedule.description),
+          h('div.schedule__meta',
+            [
+              schedule.enabled && schedule.nextRunAt ? `next ${new Date(schedule.nextRunAt).toLocaleString()}` : 'paused',
+              schedule.runCount ? `${schedule.runCount} run(s)` : null,
+              schedule.lastStatus ? `last ${schedule.lastStatus}` : null,
+              schedule.consecutiveFailures >= 3 ? `${schedule.consecutiveFailures} failures in a row` : null
+            ].filter(Boolean).join(' · '))),
+
+        h('div.schedule__actions',
+          h('button.btn.btn--sm', {
+            title: 'Run it now without moving its schedule',
+            onClick: async event => {
+              event.target.disabled = true;
+              try {
+                const { streamUrl } = await api.post(`/schedules/${schedule.id}/run`, {});
+                toast(`Started. Follow it in Tasks.${streamUrl ? '' : ''}`);
+              } catch (error) { toastError(error); }
+              finally { event.target.disabled = false; }
+            }
+          }, 'Run now'),
+          h('button.btn.btn--sm', {
+            onClick: async () => {
+              try {
+                await api.patch(`/schedules/${schedule.id}`, { enabled: !schedule.enabled });
+                load();
+              } catch (error) { toastError(error); }
+            }
+          }, schedule.enabled ? 'Pause' : 'Resume'),
+          h('button.btn.btn--danger.btn--sm', {
+            onClick: async () => {
+              if (!await confirmModal({
+                title: `Delete "${schedule.name}"?`,
+                body: 'It will stop running. Tasks it has already produced are kept.',
+                confirmLabel: 'Delete'
+              })) return;
+              try { await api.delete(`/schedules/${schedule.id}`); load(); }
+              catch (error) { toastError(error); }
+            }
+          }, 'Delete')))
+    )));
+  }
+
+  const create = h('button.btn.btn--primary', {
+    onClick: async () => {
+      create.disabled = true;
+      try {
+        await api.post('/schedules', {
+          name: fields.name.value.trim(),
+          objective: fields.objective.value.trim(),
+          cron: fields.cron.value.trim(),
+          timezone: fields.timezone.value.trim() || 'UTC',
+          mode: fields.mode.value,
+          trust: fields.trust.value,
+          projectId: fields.project.value || undefined
+        });
+        fields.name.value = '';
+        fields.objective.value = '';
+        toast('Scheduled.');
+        load();
+      } catch (error) { toastError(error); }
+      finally { create.disabled = false; }
+    }
+  }, 'Create schedule');
+
+  mount(fields.project,
+    h('option', { value: '' }, 'No project'),
+    (store.state.projects || []).map(project => h('option', { value: project.id }, project.name)));
+
+  mount(container,
+    listCard,
+    h('div.card',
+      h('h2.card__title', 'New automation'),
+      h('div.stack',
+        row('Name', 'What this automation is', fields.name),
+        row('What to do', 'Written for a run that will not have this conversation', fields.objective),
+        row('Project', 'Which repository it works in', fields.project),
+        row('Schedule', 'Five fields, or @daily', fields.cron),
+        row('Timezone', 'Wall-clock times are kept in this zone', fields.timezone),
+        row('Mode', 'How it works', fields.mode),
+        row('Allowed to', 'Nobody is present to approve anything, so choose once', fields.trust),
+        preview,
+        h('div.row', { style: { justifyContent: 'flex-end' } }, create))));
+
+  refreshPreview();
+  load();
+  return container;
+}
+
 function notificationsPanel(save) {
   const preferences = store.state.session?.profile?.notificationPreferences || {};
   const update = patch => save({ notificationPreferences: { ...preferences, ...patch } });
@@ -750,10 +925,22 @@ export async function render({ params = {} } = {}) {
     h('div.settings', nav, panel)
   );
 
+  /*
+     Scroll the section you are in into view.
+
+     The nav scrolls sideways on a phone, and a tab past the fold is a tab
+     that looks like it does not exist — arriving at Settings and seeing the
+     current section clipped at the edge reads as a rendering bug.
+  */
+  requestAnimationFrame(() => {
+    nav.querySelector('[aria-current="page"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  });
+
   const panels = {
     account: () => accountPanel(save),
     developer: () => developerPanel(save),
     ai: () => aiPanel(save),
+    automation: automationPanel,
     usage: usagePanel,
     billing: billingPanel,
     security: securityPanel,

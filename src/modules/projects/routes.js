@@ -170,6 +170,7 @@ export function projectRoutes() {
       testCommand: t.string({ max: 200 }),
       buildCommand: t.string({ max: 200 }),
       devCommand: t.string({ max: 200 }),
+      deployCommand: t.string({ max: 300 }),
       settings: t.object({}, { passthrough: true })
     }), await ctx.json());
 
@@ -179,6 +180,7 @@ export function projectRoutes() {
     if (body.testCommand !== undefined) patch.test_command = body.testCommand || null;
     if (body.buildCommand !== undefined) patch.build_command = body.buildCommand || null;
     if (body.devCommand !== undefined) patch.dev_command = body.devCommand || null;
+    if (body.deployCommand !== undefined) patch.deploy_command = body.deployCommand || null;
     if (body.settings) patch.settings = body.settings;
     if (!Object.keys(patch).length) throw badRequest('Nothing to update');
 

@@ -550,3 +550,36 @@ kbd {
 /* ── scroll shadow helper for panels ────────────────────────────────────── */
 .scroll-y { overflow-y: auto; overscroll-behavior: contain; }
 .scroll-x { overflow-x: auto; overscroll-behavior-x: contain; }
+
+/* ─── schedules ─────────────────────────────────────────────────────────────
+   Two columns on a desktop, stacked on a phone. The first version reused the
+   generic between-row, which squeezed the description into a 120px column and
+   broke every word onto its own line — a schedule nobody could read is a
+   schedule nobody trusts. */
+.schedules { display: flex; flex-direction: column; gap: var(--s-4); }
+
+.schedule {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-3);
+  align-items: start;
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--border);
+}
+.schedule:last-child { padding-bottom: 0; border-bottom: none; }
+
+.schedule__what { min-width: 0; }
+.schedule__name { font-weight: 600; color: var(--text-strong); }
+.schedule__when { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-muted); }
+.schedule__meta { margin-top: 2px; font-size: var(--fs-2xs); color: var(--text-subtle); }
+
+/* A paused schedule reads as paused before anything is read. */
+.schedule[data-enabled="false"] .schedule__name { color: var(--text-muted); }
+.schedule[data-enabled="false"] .schedule__when { text-decoration: line-through; }
+
+.schedule__actions { display: flex; gap: var(--s-2); flex: none; }
+
+@media (max-width: 640px) {
+  .schedule { grid-template-columns: 1fr; }
+  .schedule__actions { justify-content: flex-start; }
+}

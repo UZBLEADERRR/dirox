@@ -53,6 +53,7 @@ export function shapeProject(row) {
     testCommand: row.test_command,
     buildCommand: row.build_command,
     devCommand: row.dev_command,
+    deployCommand: row.deploy_command,
     status: row.status,
     indexStatus: row.index_status,
     indexError: row.index_error,

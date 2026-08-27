@@ -586,6 +586,7 @@ export async function runTask(task, options) {
       featureFlags: options.featureFlags || {},
       hasRepository: Boolean(project),
       hasDevCommand: Boolean(project?.dev_command),
+      hasDeployCommand: Boolean(project?.deploy_command),
       hasGitHub: options.hasGitHub !== false,
       hasSupabase: options.hasSupabase === true,
       includeGitHub: intent.profile.github === true,

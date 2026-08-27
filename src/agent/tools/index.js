@@ -24,6 +24,7 @@ import { webTools, WEB_TOOL_NAMES } from './web.js';
 import { screenshotTools } from './screenshot.js';
 import { skillTools, SKILL_TOOL_NAMES } from './skill.js';
 import { scheduleTools, SCHEDULE_TOOL_NAMES } from './schedule.js';
+import { deployTools, DEPLOY_TOOL_NAMES } from './deploy.js';
 import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
@@ -40,7 +41,7 @@ const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
   ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
   ...loaderTools, ...delegateTools, ...planTools, ...webTools, ...screenshotTools, ...skillTools,
-  ...scheduleTools
+  ...scheduleTools, ...deployTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -86,7 +87,7 @@ const TOOLSETS = {
  */
 export function toolsFor({
   mode = 'agent', toolset, featureFlags = {}, includeGitHub = false,
-  hasRepository = false, hasDevCommand = false, hasGitHub = true, hasSupabase = false,
+  hasRepository = false, hasDevCommand = false, hasDeployCommand = false, hasGitHub = true, hasSupabase = false,
   loadedGroups = new Set(), canDelegate = false, hasPlan = false, hasSkills = false
 } = {}) {
   // The intent profile decides first: it can refuse tools outright, which no
@@ -147,6 +148,11 @@ export function toolsFor({
   }
   if (featureFlags.schedules === false) {
     tools = tools.filter(tool => !SCHEDULE_TOOL_NAMES.has(tool.name));
+  }
+  // Without a project there is nothing to ship, and without a deploy command
+  // the tool can only ever explain that it cannot run.
+  if (!hasRepository || !hasDeployCommand || featureFlags.deploy === false) {
+    tools = tools.filter(tool => !DEPLOY_TOOL_NAMES.has(tool.name));
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));

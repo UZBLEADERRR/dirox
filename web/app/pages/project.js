@@ -72,7 +72,10 @@ function commandsPanel(project, onSave) {
   const fields = [
     ['testCommand', 'Test command', 'npm test'],
     ['buildCommand', 'Build command', 'npm run build'],
-    ['devCommand', 'Dev command', 'npm run dev']
+    ['devCommand', 'Dev command', 'npm run dev'],
+    // Whatever this team actually runs to ship. The agent asks before running
+    // it, every time, because its consequence is other people.
+    ['deployCommand', 'Deploy command', 'git push production main']
   ];
 
   const inputs = {};

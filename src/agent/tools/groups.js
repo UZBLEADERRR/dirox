@@ -52,8 +52,8 @@ export const TOOL_GROUPS = {
     tools: ['create_file', 'delete_file', 'move_file', 'search_files']
   },
   build: {
-    summary: 'Building and dependencies: run a build, run the linter, install a package, audit dependencies.',
-    tools: ['run_build', 'run_linter', 'install_dependency', 'dependency_audit', 'inspect_dependencies']
+    summary: 'Building, dependencies and shipping: run a build, run the linter, install a package, audit dependencies, deploy.',
+    tools: ['run_build', 'run_linter', 'install_dependency', 'dependency_audit', 'inspect_dependencies', 'deploy']
   },
   delivery: {
     summary: 'Handing files to the user, and using files they uploaded: send a download, place an upload in the project, list uploads.',
@@ -100,7 +100,7 @@ const HINTS = [
   [/\bsupabase|database|schema|migration|\bSQL\b|\btable\b|postgres/i, 'database'],
   [/\bcommit|branch|\bgit\b|revert|merge\b/i, 'git'],
   [/\bzip\b|download|export|send me|\bapk\b|\bpdf\b|upload|logo|attach/i, 'delivery'],
-  [/\bbuild\b|\bcompile|dependenc|\binstall\b|\bnpm i\b|lint/i, 'build'],
+  [/\bbuild\b|\bcompile|dependenc|\binstall\b|\bnpm i\b|lint|deploy|\bship\b|release|production/i, 'build'],
   [/\bpreview|screenshot|render|browser|\bpage\b|\bUI\b|looks?\b|design|layout|mobile|responsive/i, 'preview'],
   [/\bsecret|credential|leak|\.env\b/i, 'security'],
   // A task that names the outside world will need the outside world on its
