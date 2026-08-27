@@ -15,6 +15,7 @@ import { fileTools } from './files.js';
 import { terminalTools } from './terminal.js';
 import { gitTools } from './git.js';
 import { githubTools, GITHUB_TOOL_NAMES } from './github.js';
+import { deliverTools } from './deliver.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
 import { parse, toJsonSchema } from '../../core/validate.js';
@@ -25,7 +26,10 @@ import { serviceClient, hasServiceRole } from '../../db/supabase.js';
 import { runtimeStats } from '../../modules/observability/audit.js';
 import { logger } from '../../core/logger.js';
 
-const ALL_TOOLS = [...fileTools, ...terminalTools, ...gitTools, ...githubTools, ...projectTools, ...previewTools];
+const ALL_TOOLS = [
+  ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
+  ...deliverTools, ...projectTools, ...previewTools
+];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -94,7 +98,7 @@ export function toolsFor({
   // talks to the user's account and does not: "which repositories do I have"
   // is a fair question to ask before any of them is open.
   if (!hasRepository) {
-    tools = tools.filter(tool => !tool.name.startsWith('git_'));
+    tools = tools.filter(tool => !tool.name.startsWith('git_') && tool.name !== 'deliver_file');
   }
   if (featureFlags.github === false || !hasGitHub) {
     tools = tools.filter(tool => !GITHUB_TOOL_NAMES.has(tool.name));

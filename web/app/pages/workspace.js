@@ -51,6 +51,48 @@ function assistantMessage({ activityElement, onFileClick }) {
   return { element, body, foot };
 }
 
+/**
+ * A file the agent produced and is handing over.
+ *
+ * A real anchor with `download`, not a scripted save: the browser then shows
+ * its own progress, resumes, and puts the file where the person expects it.
+ */
+function deliverableCard(file) {
+  return h('a.deliverable', {
+    href: `/api/deliverables/${file.id}/download`,
+    download: file.name,
+    'data-native': 'true',
+    title: `Download ${file.name}`,
+    // A download URL cannot carry an Authorization header, so the grant is
+    // fetched at the moment of the click and spent immediately. Navigating to
+    // an attachment does not leave the page, so the conversation stays put.
+    onClick: async event => {
+      event.preventDefault();
+      try {
+        const { url } = await api.get(`/deliverables/${file.id}/link`);
+        window.location.href = url;
+      } catch (error) {
+        toastError(error, 'That file could not be downloaded');
+      }
+    }
+  },
+    h('span.deliverable__icon', icon('file', { size: 16 })),
+    h('span.deliverable__text',
+      h('span.deliverable__name.truncate', file.name),
+      h('span.deliverable__meta', [file.size || formatBytes(file.sizeBytes), file.label].filter(Boolean).join(' · '))
+    ),
+    h('span.deliverable__action', icon('arrowRight', { size: 15 }))
+  );
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function approvalCard({ approval, onDecide }) {
   const card = h('div.approval', { role: 'alertdialog' },
     h('div.approval__title', 'Approval needed'),
@@ -303,6 +345,9 @@ export async function render({ params, query = {} }) {
 
     const activity = createActivity({ onFileClick });
     const bubble = assistantMessage({ activityElement: activity.element, onFileClick });
+    const files = h('div.deliverables');
+    const deliveredIds = new Set();
+    bubble.element.insertBefore(files, bubble.foot);
     thread.appendChild(bubble.element);
     scrollToEnd();
 
@@ -358,6 +403,14 @@ export async function render({ params, query = {} }) {
           case 'context': activity.context(data); break;
           case 'model': activity.model(data); break;
           case 'notice': activity.notice(data); break;
+          case 'deliverable':
+            // Shown the moment it exists rather than only in the summary: a
+            // long run should hand over the file as soon as it is ready.
+            if (!deliveredIds.has(data.id)) {
+              deliveredIds.add(data.id);
+              files.appendChild(deliverableCard(data));
+            }
+            break;
           case 'cost': budget = data; break;
           case 'plan':
             if (data.summary) mount(bubble.body, renderMarkdown(`**Plan.** ${data.summary}`, { onFileClick }));

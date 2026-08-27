@@ -280,6 +280,39 @@
   .chat__welcome-body { font-size: var(--fs-sm); }
 }
 
+/* ── deliverables ───────────────────────────────────────────────────────── */
+/* A file the agent produced. Deliberately card-shaped and not a link in a
+   sentence: it is the outcome of the work, not a reference inside it. */
+.deliverables { display: flex; flex-direction: column; gap: var(--s-2); }
+.deliverables:empty { display: none; }
+
+.deliverable {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-panel);
+  color: var(--text);
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.deliverable:hover { border-color: var(--accent-line); background: var(--bg-hover); color: var(--text-strong); }
+.deliverable__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: var(--r-md);
+  background: var(--accent-quiet);
+  color: var(--accent-text);
+}
+.deliverable__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.deliverable__name { font-size: var(--fs-sm); font-weight: 500; color: var(--text-strong); }
+.deliverable__meta { font-size: var(--fs-xs); color: var(--text-subtle); }
+.deliverable__action { flex: none; color: var(--text-subtle); }
+.deliverable:hover .deliverable__action { color: var(--accent-text); }
+
 /* ── task status strip ──────────────────────────────────────────────────── */
 .task-strip {
   display: flex;

@@ -175,7 +175,13 @@ export function systemPrompt({ tier = 'full', mode = 'agent', project, projectRu
     sections.push([
       '## Tools',
       `Available: ${toolNames.join(', ')}.`,
-      'Call a tool when you need a fact you do not have. Do not call a tool to confirm something already in context.'
+      'Call a tool when you need a fact you do not have. Do not call a tool to confirm something already in context.',
+      ...(toolNames.includes('deliver_file') ? [
+        '',
+        'When the user asks to be *given* something — a zip, a report, an export, a build output —',
+        'produce the file with the terminal first, then call `deliver_file` with its path.',
+        'Saying a file is ready without delivering it hands the user nothing.'
+      ] : [])
     ].join('\n'));
   }
 

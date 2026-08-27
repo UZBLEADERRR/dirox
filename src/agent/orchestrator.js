@@ -64,7 +64,8 @@ export async function runTask(task, options) {
     escalations: 0,
     checkpointed: false,
     checkpointId: null,
-    conversation: []
+    conversation: [],
+    deliverables: []
   };
 
   const recordFileChange = (path, kind) => {
@@ -503,6 +504,7 @@ export async function runTask(task, options) {
         const result = await executeTool(call, {
           projectId: project?.id,
           project,
+          orgId: auth.org.id,
           userId: auth.user.id,
           taskId: task.id,
           trust: options.trust,
@@ -513,6 +515,12 @@ export async function runTask(task, options) {
           toolOutputLimit: limits.toolOutputChars,
           recordFileChange,
           beforeFileChange,
+          // A file the user can save is worth its own event: the chat shows it
+          // as soon as it exists rather than only in the closing summary.
+          onDeliverable: file => {
+            state.deliverables.push(file);
+            emit('deliverable', file);
+          },
           onOutput: chunk => emit('output', { tool: call.name, ...chunk })
         });
 
@@ -636,6 +644,7 @@ export async function runTask(task, options) {
     const result = {
       summary: finalText || 'Task completed.',
       changedFiles,
+      deliverables: state.deliverables,
       validation: validation ? { passed: validation.ok, summary: validation.metadata?.summary } : null,
       review: review ? { findings: review.findings.length, summary: summariseFindings(review.findings) } : null,
       plan,

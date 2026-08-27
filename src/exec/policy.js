@@ -23,7 +23,13 @@ const DEFAULT_POLICY = {
     'ruby', 'bundle', 'rake',
     'git', 'make', 'jest', 'vitest', 'eslint', 'prettier', 'tsc', 'tsx',
     'ls', 'cat', 'head', 'tail', 'grep', 'rg', 'find', 'wc', 'echo', 'pwd',
-    'mkdir', 'touch', 'cp', 'mv', 'rm', 'sed', 'awk', 'sort', 'uniq', 'diff'
+    'mkdir', 'touch', 'cp', 'mv', 'rm', 'sed', 'awk', 'sort', 'uniq', 'diff',
+    // Packaging. Asked to "send me the project as a zip", the agent needs a
+    // way to make one; without these it could only describe the idea.
+    'zip', 'unzip', 'tar', 'gzip', 'gunzip', 'bzip2', 'xz', 'sha256sum', 'md5sum',
+    // Document and media conversion, useful when present and honestly
+    // reported as missing when not.
+    'pandoc', 'ffmpeg', 'convert', 'qpdf', 'gs'
   ],
   deny: [
     'curl', 'wget', 'ssh', 'scp', 'rsync', 'nc', 'netcat', 'telnet', 'ftp',
