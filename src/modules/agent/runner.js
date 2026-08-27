@@ -19,6 +19,7 @@ import { getConnection as supabaseConnection } from '../projects/supabase.js';
 import { materialiseWorkspace, snapshotWorkspace } from '../../exec/persistence.js';
 import { config } from '../../config/env.js';
 import { invalidatePlanUsage } from '../billing/usage.js';
+import { TRUST } from '../../agent/permissions.js';
 
 /** Has this user connected GitHub, and can the deployment talk to it at all? */
 async function githubConnected(userId) {
@@ -80,7 +81,7 @@ function emitter(taskId) {
  * Start a task.
  * @returns {Promise<object>} the run result
  */
-export async function startTask(task, { project, auth, trust, allowedTiers, preferredModelId, autoTest, approvedCalls = new Set() }) {
+export async function startTask(task, { project, auth, trust, allowedTiers, preferredModelId, autoTest, confirmPlan, approvedCalls = new Set() }) {
   if (active.has(task.id)) throw conflict('This task is already running');
 
   const controller = new AbortController();
@@ -104,7 +105,7 @@ export async function startTask(task, { project, auth, trust, allowedTiers, pref
 
   const promise = runTask(task, {
     project, auth, emit, signal: controller.signal, approvedCalls,
-    trust, allowedTiers, preferredModelId, autoTest, featureFlags, hasGitHub, hasSupabase
+    trust, allowedTiers, preferredModelId, autoTest, confirmPlan, featureFlags, hasGitHub, hasSupabase
   })
     .then(async result => {
       run.finished = true;
@@ -169,6 +170,31 @@ export async function approveAndResume(task, callId, options) {
     ...options,
     approvedCalls: approved
   });
+}
+
+/**
+ * The plan was shown, and the person said go.
+ *
+ * From here the run carries on to the end without stopping for each edit —
+ * that is what confirming a plan means, and asking again for every file would
+ * make the confirmation worthless. Trust is raised for this run only, and only
+ * to `autonomous`: destructive and outward-facing actions still stop, because
+ * "yes, build it" is not the same sentence as "yes, drop the table".
+ */
+export async function approvePlanAndResume(task, options) {
+  const current = hasServiceRole()
+    ? await serviceClient().from('tasks').select('*').eq('id', task.id).first().catch(() => null)
+    : null;
+
+  const stored = current?.run_state && typeof current.run_state === 'object' ? current.run_state : {};
+  const runState = { ...stored, version: 1, planApproved: true };
+
+  await updateTask(task.id, { status: 'running', approval: null, run_state: runState });
+
+  return startTask(
+    { ...task, ...(current || {}), status: 'running', approval: null, run_state: runState },
+    { ...options, trust: TRUST.AUTONOMOUS, confirmPlan: false }
+  );
 }
 
 async function afterRun(task, result, auth) {

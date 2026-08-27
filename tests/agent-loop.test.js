@@ -26,6 +26,9 @@ let reply = 'Salom! Nima qilib beray?';
  */
 let script = [];
 
+/** What the planner answers, when a case needs a real plan. */
+let plannedSteps = null;
+
 const MODEL = {
   id: 'model-1', code: 'test/haiku', name: 'Test Haiku', max_output: 8192,
   supports_tools: true, supports_prompt_cache: true, supports_vision: false,
@@ -59,8 +62,11 @@ function isRouterCall(request) {
            own heuristic — which is the code under test in those cases anyway.
         */
         if (isRouterCall(request)) {
+          const planning = (request.messages ?? []).some(message =>
+            /^Produce a short implementation plan/.test(String(message.content ?? '')));
           return {
-            text: '{}', toolCalls: [],
+            text: planning && plannedSteps ? JSON.stringify(plannedSteps) : '{}',
+            toolCalls: [],
             usage: { inputTokens: 30, outputTokens: 4, cachedInputTokens: 0 },
             costMicros: 24, finishReason: 'stop', model: MODEL
           };
@@ -114,10 +120,11 @@ function isRouterCall(request) {
 }
 
 /** Start each case from a clean record. */
-function fresh(answer, turns = []) {
+function fresh(answer, turns = [], plan = null) {
   calls = [];
   reply = answer;
   script = turns;
+  plannedSteps = plan;
 }
 
 /**
@@ -483,4 +490,107 @@ test('a batch of reads comes back in the order it was asked for', async () => {
 
   assert.deepEqual(results.slice(0, 3), ['c-1', 'c-2', 'c-3'],
     `the answers came back as ${results.join(', ')}`);
+});
+
+// ─── the plan, and asking before starting ───────────────────────────────────
+
+const PLAN = {
+  summary: 'Add a rate limiter to the login endpoint.',
+  steps: [
+    { title: 'Write the limiter', files: ['src/core/limit.js'] },
+    { title: 'Apply it to the login route', files: ['src/auth/routes.js'] },
+    { title: 'Cover it with tests', files: ['tests/limit.test.js'] }
+  ]
+};
+
+test('a substantial change is not started until the person says so', async () => {
+  /*
+     The plan is the cheapest moment to disagree: nothing has been written and
+     nothing has been spent beyond the planning call. An agent that starts
+     editing the moment it has an idea is one nobody can steer.
+  */
+  fresh('Done.', [callTool('write_file', { path: 'src/core/limit.js' })], PLAN);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, events } = await run('add rate limiting to the login endpoint', {
+    project, budget_micros: 5_000_000
+  });
+
+  assert.equal(result.status, 'waiting_for_approval');
+  assert.equal(result.approval.kind, 'plan');
+  assert.equal(result.approval.plan.steps.length, 3);
+  assert.equal(result.approval.plan.done, 0);
+  assert.deepEqual(result.changedFiles, [], 'a file was changed before anyone agreed to the plan');
+
+  // The plan reaches the browser before the question does, so the card is
+  // already on screen when it is asked.
+  const types = events.map(event => event.type);
+  assert.ok(types.indexOf('plan') < types.indexOf('approval'));
+});
+
+test('saying go runs the rest without asking again', async () => {
+  fresh('Finished all three steps.', [], PLAN);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result } = await run('add rate limiting to the login endpoint', {
+    project,
+    budget_micros: 5_000_000,
+    complexity: 'level2',
+    plan: PLAN,
+    run_state: { version: 1, planApproved: true, intent: 'code', level: 'level2', category: 'code', conversation: [], pendingCalls: [] }
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.summary, 'Finished all three steps.');
+});
+
+test('a one-step change is not put to a vote', async () => {
+  // Asking about everything is the same as asking about nothing: a
+  // confirmation that always appears stops being read.
+  fresh('Renamed it.', [], { summary: 'Rename the helper.', steps: [{ title: 'Rename it', files: ['src/util.js'] }] });
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result } = await run('rename the helper in src/util.js', { project, budget_micros: 5_000_000 });
+
+  assert.equal(result.status, 'completed');
+});
+
+test('autopilot was the answer to that question', async () => {
+  fresh('Done.', [], PLAN);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result } = await run('add rate limiting to the login endpoint', {
+    project, mode: 'autopilot', budget_micros: 5_000_000
+  });
+
+  assert.equal(result.status, 'completed', 'autopilot stopped to ask permission it had already been given');
+});
+
+test('the agent can say how far it has got, and only when there is a plan', async () => {
+  fresh('Step one is done.', [callTool('update_plan', { step: 1, status: 'done' })], PLAN);
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { result, events } = await run('add rate limiting to the login endpoint', {
+    project,
+    budget_micros: 5_000_000,
+    complexity: 'level2',
+    plan: PLAN,
+    run_state: { version: 1, planApproved: true, intent: 'code', level: 'level2', category: 'code', conversation: [], pendingCalls: [] }
+  });
+
+  assert.equal(result.status, 'completed');
+
+  const progress = events.filter(event => event.type === 'plan').at(-1);
+  assert.equal(progress?.data.done, 1, 'the reported step did not reach the plan card');
+  assert.equal(progress?.data.steps[0].status, 'done');
+});
+
+test('a task with no plan is not offered a way to report against one', async () => {
+  fresh('It routes by category and level.');
+
+  const project = { id: 'project-1', name: 'api', index_status: 'ready' };
+  const { calls: made } = await run('what does the model router do in this project?', { project });
+
+  const names = (turns(made).at(-1).tools || []).map(tool => tool.function?.name ?? tool.name);
+  assert.ok(!names.includes('update_plan'));
 });

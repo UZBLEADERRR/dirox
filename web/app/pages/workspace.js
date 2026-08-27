@@ -18,6 +18,7 @@ import { renderInShell, setPanel, clearPanel, refreshConversations } from '../co
 import { registerCommands, clearCommands } from '../components/palette.js';
 import { createComposer } from '../components/composer.js';
 import { createActivity } from '../components/activity.js';
+import { planCard } from '../components/plan.js';
 import { renderMarkdown } from '../components/markdown.js';
 import { toast, toastError } from '../lib/toast.js';
 import { formatCost, formatTokens } from '../lib/format.js';
@@ -514,83 +515,125 @@ export async function render({ params, query = {} }) {
     let finalText = '';
     let budget = null;
     let approvalShown = false;
+    let plan = null;
 
-    currentStream = api.stream(`/tasks/${task.id}/stream`, {
-      onEvent: (type, data) => {
-        switch (type) {
-          case 'step': activity.step(data); break;
-          case 'tool': activity.tool(data); break;
-          case 'context': activity.context(data); break;
-          case 'model': activity.model(data); break;
-          case 'notice': activity.notice(data); break;
-          case 'delegate': activity.delegate(data); break;
-          case 'deliverable':
-            // Shown the moment it exists rather than only in the summary: a
-            // long run should hand over the file as soon as it is ready.
-            if (!deliveredIds.has(data.id)) {
-              deliveredIds.add(data.id);
-              files.appendChild(deliverableCard(data));
-            }
-            break;
-          case 'cost': budget = data; break;
-          case 'plan':
-            if (data.summary) mount(bubble.body, renderMarkdown(`**Plan.** ${data.summary}`, { onFileClick }));
-            break;
-          case 'approval':
-            if (approvalShown) break;
-            approvalShown = true;
+    /** Draw the plan, or update the one already drawn. */
+    function showPlan(data) {
+      if (!data?.steps?.length) return plan;
+      if (!plan) {
+        plan = planCard({
+          plan: data,
+          onStart: () => decide(true),
+          onDecline: () => decide(false)
+        });
+        bubble.element.appendChild(plan.element);
+      } else {
+        plan.update(data);
+      }
+      return plan;
+    }
+
+    /** Answer whatever the run is waiting on, and follow it again. */
+    async function decide(approved, toolCallId) {
+      try {
+        const result = await api.post(`/tasks/${task.id}/approve`, { approved, toolCallId });
+        bubble.element.querySelector('.approval')?.remove();
+        plan?.hideActions();
+
+        if (result.resumed) {
+          approvalShown = false;
+          composer.setRunning(true);
+          followStream(task.id);
+        } else {
+          composer.setRunning(false);
+          activity.failed(approved ? 'The task could not continue.' : 'You did not approve it, so nothing was changed.');
+        }
+      } catch (error) { toastError(error); }
+    }
+
+    /*
+       One handler for the run, however many times we connect to it.
+
+       An approval closes the stream and opens a new one, and the new one used
+       to be subscribed with an empty handler — so approving an action resumed
+       the run on the server and then showed the user nothing at all until it
+       finished. Naming the handler is what makes resuming visible.
+    */
+    function handleEvent(type, data) {
+      switch (type) {
+        case 'step': activity.step(data); break;
+        case 'tool': activity.tool(data); break;
+        case 'context': activity.context(data); break;
+        case 'model': activity.model(data); break;
+        case 'notice': activity.notice(data); break;
+        case 'delegate': activity.delegate(data); break;
+        case 'deliverable':
+          // Shown the moment it exists rather than only in the summary: a
+          // long run should hand over the file as soon as it is ready.
+          if (!deliveredIds.has(data.id)) {
+            deliveredIds.add(data.id);
+            files.appendChild(deliverableCard(data));
+          }
+          break;
+        case 'cost': budget = data; break;
+        case 'plan':
+          /*
+             The same card throughout: first the thing to approve, then the
+             thing to follow. A person who agreed to five steps should watch
+             those five steps, not a different rendering of the same work.
+          */
+          showPlan(data);
+          break;
+        case 'approval':
+          if (approvalShown) break;
+          approvalShown = true;
+
+          if (data.kind === 'plan') {
+            const card = showPlan(data.plan);
+            card?.askToStart();
+          } else {
             bubble.element.appendChild(approvalCard({
               approval: data,
-              onDecide: async approved => {
-                try {
-                  const result = await api.post(`/tasks/${task.id}/approve`, { approved, toolCallId: data.toolCallId });
-                  bubble.element.querySelector('.approval')?.remove();
-                  if (result.resumed) {
-                    approvalShown = false;
-                    composer.setRunning(true);
-                    followStream(task.id);
-                  } else {
-                    composer.setRunning(false);
-                    activity.failed('You declined the action.');
-                  }
-                } catch (error) { toastError(error); }
-              }
+              onDecide: approved => decide(approved, data.toolCallId)
             }));
-            scrollToEnd();
-            break;
-          case 'done':
-            finalText = data.summary || '';
-            lastChangedFiles = data.changedFiles || [];
-            activity.done({ ...data, budget });
-            break;
-          case 'error':
-            activity.failed(data.message);
-            mount(bubble.body, h('p.field__error', data.message));
-            break;
-          case 'cancelled':
-            activity.failed('Stopped.');
-            break;
-          case 'state':
-            if (data.result?.summary) finalText = data.result.summary;
-            lastChangedFiles = data.changedFiles || [];
-            break;
-          case 'finished':
-            finishRun();
-            break;
-          default: break;
-        }
-        scrollToEnd();
-      },
-      onError: error => {
-        composer.setRunning(false);
-        activity.failed(error.message || 'The activity stream was interrupted');
+          }
+          scrollToEnd();
+          break;
+        case 'done':
+          finalText = data.summary || '';
+          lastChangedFiles = data.changedFiles || [];
+          activity.done({ ...data, budget });
+          break;
+        case 'error':
+          activity.failed(data.message);
+          mount(bubble.body, h('p.field__error', data.message));
+          break;
+        case 'cancelled':
+          activity.failed('Stopped.');
+          break;
+        case 'state':
+          if (data.result?.summary) finalText = data.result.summary;
+          lastChangedFiles = data.changedFiles || [];
+          break;
+        case 'finished':
+          finishRun();
+          break;
+        default: break;
       }
-    });
+      scrollToEnd();
+    }
+
+    function onStreamError(error) {
+      composer.setRunning(false);
+      activity.failed(error.message || 'The activity stream was interrupted');
+    }
 
     function followStream(id) {
       closeStream();
-      currentStream = api.stream(`/tasks/${id}/stream`, { onEvent: () => {} });
+      currentStream = api.stream(`/tasks/${id}/stream`, { onEvent: handleEvent, onError: onStreamError });
     }
+
+    followStream(task.id);
 
     function finishRun() {
       composer.setRunning(false);

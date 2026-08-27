@@ -93,6 +93,11 @@ export function packRunState(state, extra = {}) {
     // "usually" here means a resumed coding run occasionally comes back as a
     // question and loses every tool it had.
     intent: extra.intent ?? null,
+    // Whether the person has seen the plan and said go. A resumed run must
+    // never ask a second time — being asked twice for the same permission
+    // reads as the product having forgotten.
+    planApproved: Boolean(extra.planApproved),
+    planProgress: Object.fromEntries(state.planProgress ?? []),
     escalations: Number(state.escalations || 0),
     checkpointId: state.checkpointId ?? null,
     finalText: String(extra.finalText || '').slice(0, 4000),
@@ -136,7 +141,9 @@ export function unpackRunState(stored) {
   // A state with nothing in it is not a resumable run; it is an empty column.
   const conversation = Array.isArray(stored.conversation) ? stored.conversation : [];
   const pendingCalls = Array.isArray(stored.pendingCalls) ? stored.pendingCalls : [];
-  if (!conversation.length && !pendingCalls.length) return null;
+  // A plan waiting on a person is a resumable run that has not said anything
+  // yet: no conversation, no pending calls, and everything still to do.
+  if (!conversation.length && !pendingCalls.length && !stored.planApproved) return null;
 
   return {
     iteration: Number(stored.iteration) || 0,
@@ -144,6 +151,8 @@ export function unpackRunState(stored) {
     category: stored.category ?? null,
     level: stored.level ?? null,
     intent: typeof stored.intent === 'string' ? stored.intent : null,
+    planApproved: Boolean(stored.planApproved),
+    planProgress: stored.planProgress && typeof stored.planProgress === 'object' ? stored.planProgress : {},
     escalations: Number(stored.escalations) || 0,
     checkpointId: stored.checkpointId ?? null,
     finalText: String(stored.finalText || ''),

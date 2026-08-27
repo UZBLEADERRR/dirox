@@ -11,7 +11,7 @@ import { assertWithinPlan, getPlanUsage } from '../billing/usage.js';
 import { defaultBudgetFor } from '../../context/budget.js';
 import { classify } from '../../ai/router.js';
 import { restoreCheckpoint, compareCheckpoint, createCheckpoint } from '../../agent/checkpoints.js';
-import { startTask, stopTask, subscribe, activeRun, isRunning, approveAndResume, queueBackgroundRun } from './runner.js';
+import { startTask, stopTask, subscribe, activeRun, isRunning, approveAndResume, approvePlanAndResume, queueBackgroundRun } from './runner.js';
 import { TRUST } from '../../agent/permissions.js';
 
 const MODES = ['ask', 'edit', 'agent', 'autopilot', 'review', 'debug', 'plan'];
@@ -224,21 +224,32 @@ export function taskRoutes() {
       toolCallId: t.string({ max: 100 })
     }), await ctx.json());
 
-    if (body.toolCallId && body.toolCallId !== task.approval.toolCallId) {
+    // A plan approval has no tool call behind it: nothing has run yet, which
+    // is the whole reason it is the right moment to ask.
+    const isPlan = task.approval.kind === 'plan';
+
+    if (!isPlan && body.toolCallId && body.toolCallId !== task.approval.toolCallId) {
       throw conflict('That approval is no longer the pending one');
     }
 
     audit.record({
       orgId: ctx.auth.org.id, actorId: ctx.auth.user.id,
       action: body.approved ? 'task.approved' : 'task.rejected',
-      resource: 'tool_call', resourceId: task.approval.toolCallId, severity: 'warning',
-      metadata: { tool: task.approval.tool, risk: task.approval.risk }
+      resource: isPlan ? 'plan' : 'tool_call',
+      resourceId: isPlan ? task.id : task.approval.toolCallId,
+      severity: 'warning',
+      metadata: isPlan
+        ? { steps: task.approval.plan?.steps?.length ?? 0 }
+        : { tool: task.approval.tool, risk: task.approval.risk }
     });
 
     if (!body.approved) {
       await ctx.auth.db.from('tasks').eq('id', task.id).update({
         status: 'cancelled', approval: null, finished_at: new Date().toISOString(),
-        error: `You declined: ${task.approval.description}`
+        run_state: {},
+        error: isPlan
+          ? 'You did not approve the plan, so nothing was changed.'
+          : `You declined: ${task.approval.description}`
       });
       return sendJson(ctx.res, 200, { ok: true, resumed: false });
     }
@@ -248,7 +259,9 @@ export function taskRoutes() {
       : null;
     const options = await runOptions(ctx, project);
 
-    approveAndResume(task, task.approval.toolCallId, options).catch(() => {});
+    if (isPlan) approvePlanAndResume(task, options).catch(() => {});
+    else approveAndResume(task, task.approval.toolCallId, options).catch(() => {});
+
     return sendJson(ctx.res, 200, { ok: true, resumed: true, streamUrl: `/api/tasks/${task.id}/stream` });
   }, { auth: 'write' });
 

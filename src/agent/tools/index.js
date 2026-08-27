@@ -19,6 +19,7 @@ import { deliverTools, uploadTools } from './deliver.js';
 import { supabaseTools, SUPABASE_TOOL_NAMES } from './supabase.js';
 import { loaderTools } from './loader.js';
 import { delegateTools } from './delegate.js';
+import { planTools, PLAN_TOOL_NAMES } from './plan.js';
 import { CORE_TOOLS, GROUPED_TOOL_NAMES, TOOL_GROUPS, GROUP_NAMES, toolNamesForGroups } from './groups.js';
 import { projectTools } from './project.js';
 import { previewTools } from './preview.js';
@@ -34,7 +35,7 @@ import { logger } from '../../core/logger.js';
 const ALL_TOOLS = [
   ...fileTools, ...terminalTools, ...gitTools, ...githubTools,
   ...deliverTools, ...uploadTools, ...supabaseTools, ...projectTools, ...previewTools,
-  ...loaderTools, ...delegateTools
+  ...loaderTools, ...delegateTools, ...planTools
 ];
 const BY_NAME = new Map(ALL_TOOLS.map(tool => [tool.name, tool]));
 
@@ -81,7 +82,7 @@ const TOOLSETS = {
 export function toolsFor({
   mode = 'agent', toolset, featureFlags = {}, includeGitHub = false,
   hasRepository = false, hasDevCommand = false, hasGitHub = true, hasSupabase = false,
-  loadedGroups = new Set(), canDelegate = false
+  loadedGroups = new Set(), canDelegate = false, hasPlan = false
 } = {}) {
   // The intent profile decides first: it can refuse tools outright, which no
   // amount of later filtering can do as cheaply.
@@ -125,6 +126,11 @@ export function toolsFor({
   */
   if (!canDelegate || featureFlags.sub_agents === false) {
     tools = tools.filter(tool => tool.name !== 'delegate');
+  }
+  // Reporting progress against a plan that does not exist is a tool that can
+  // only ever return an error, and one the model will try anyway.
+  if (!hasPlan) {
+    tools = tools.filter(tool => !PLAN_TOOL_NAMES.has(tool.name));
   }
   if (featureFlags.terminal === false) {
     tools = tools.filter(tool => !['execute_command', 'run_tests', 'run_build', 'run_linter', 'install_dependency', 'dependency_audit'].includes(tool.name));

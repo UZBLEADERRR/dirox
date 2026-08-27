@@ -65,22 +65,56 @@ export function createComposer({
   // ── pickers ──
   const modeSelect = h('select.select.select--bare', {
     'aria-label': 'Mode',
-    onChange: event => { mode = event.target.value; syncModeAvailability(); }
+    onChange: event => { mode = event.target.value; syncModeAvailability(); fitSelect(modeSelect); }
   }, MODES.map(([id, label, description]) => h('option', { value: id, title: description }, label)));
   modeSelect.value = mode;
 
   const projectSelect = h('select.select.select--bare', {
     'aria-label': 'Project',
-    onChange: event => { projectId = event.target.value || null; syncModeAvailability(); }
+    onChange: event => { projectId = event.target.value || null; syncModeAvailability(); fitSelect(projectSelect); }
   });
 
-  const modelSelect = h('select.select.select--bare', { 'aria-label': 'Model' });
+  const modelSelect = h('select.select.select--bare', {
+    'aria-label': 'Model',
+    onChange: () => fitSelect(modelSelect)
+  });
 
   const projectWrap = h('label.composer__picker', { hidden: !showProjectPicker },
-    icon('folder', { size: 13 }), projectSelect);
+    icon('folder', { size: 12 }), projectSelect);
 
   const modelWrap = h('label.composer__picker', { hidden: true },
-    icon('sparkle', { size: 13 }), modelSelect);
+    icon('sparkle', { size: 12 }), modelSelect);
+
+  /*
+     A `<select>` is as wide as its widest option, not as wide as the option
+     it is showing.
+
+     That is invisible on a desktop and ruinous on a phone: "Auto" sat in a
+     125-pixel pill because "Dirox Reason" was further down the list, and the
+     three pills together overflowed a 390-pixel screen. So each one is
+     measured against the text it is actually displaying.
+
+     The gauge is a real span in the same box, so it inherits the same font
+     without anything having to be kept in sync.
+  */
+  const gauge = h('span.composer__gauge', { 'aria-hidden': 'true' });
+
+  /** Room for the chevron the browser draws inside the select. */
+  const CHEVRON = 22;
+
+  function fitSelect(select) {
+    const label = select.selectedOptions[0]?.textContent ?? '';
+    if (!label) return;
+    gauge.textContent = label;
+    const width = gauge.getBoundingClientRect().width;
+    // Before the composer is in the document there is nothing to measure, and
+    // a width of zero would collapse the pill. Leave it to the next call.
+    if (width > 0) select.style.width = `${Math.ceil(width) + CHEVRON}px`;
+  }
+
+  function fitAll() {
+    for (const select of [projectSelect, modeSelect, modelSelect]) fitSelect(select);
+  }
 
   /**
    * Only models an administrator has opened to users appear here. The server
@@ -89,10 +123,11 @@ export function createComposer({
   function renderModels(models, defaultModelId) {
     modelWrap.hidden = models.length === 0;
     mount(modelSelect,
-      h('option', { value: '' }, 'Automatic'),
+      h('option', { value: '' }, 'Auto'),
       models.map(model => h('option', { value: model.id, title: model.description || '' }, model.name))
     );
     if (defaultModelId && models.some(model => model.id === defaultModelId)) modelSelect.value = defaultModelId;
+    fitSelect(modelSelect);
   }
 
   function renderProjects(projects) {
@@ -101,6 +136,7 @@ export function createComposer({
       projects.map(project => h('option', { value: project.id }, project.name))
     );
     projectSelect.value = projectId || '';
+    fitSelect(projectSelect);
   }
 
   /**
@@ -238,6 +274,7 @@ export function createComposer({
   const element = h('div.composer',
     h('div.composer__inner',
       h('div.composer__box',
+        gauge,
         input,
         attachmentBar,
         h('div.composer__bar',
@@ -245,7 +282,7 @@ export function createComposer({
             attachButton,
             filePicker,
             projectWrap,
-            h('label.composer__picker', icon('settings', { size: 13 }), modeSelect),
+            h('label.composer__picker.composer__picker--plain', modeSelect),
             modelWrap
           ),
           h('span.composer__hint', h('kbd', '↵'), ' send'),
@@ -257,8 +294,10 @@ export function createComposer({
   );
 
   // The placeholder alone can need two lines, so the box is sized before it is
-  // ever typed into rather than on the first keystroke.
-  requestAnimationFrame(autoResize);
+  // ever typed into rather than on the first keystroke. The pills are measured
+  // in the same frame, for the same reason: nothing can be measured until the
+  // composer is in the document.
+  requestAnimationFrame(() => { autoResize(); fitAll(); });
 
   return {
     element,
@@ -266,12 +305,13 @@ export function createComposer({
     get mode() { return mode; },
     get projectId() { return projectId; },
 
-    setMode(next) { mode = next; modeSelect.value = next; syncModeAvailability(); },
+    setMode(next) { mode = next; modeSelect.value = next; syncModeAvailability(); fitSelect(modeSelect); },
 
     setProject(id) {
       projectId = id || null;
       projectSelect.value = projectId || '';
       syncModeAvailability();
+      fitSelect(projectSelect);
     },
 
     setRunning(value) {

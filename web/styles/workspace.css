@@ -212,36 +212,47 @@
 }
 
 /*
-   A picker in the composer bar is a select without the box: the label reads as
-   text until you hover it, so three controls sit in the bar without turning it
-   into a form. The select itself still handles keyboard, touch and screen
-   readers, because it is a real select.
+   Each picker is a pill.
+
+   The previous version was a bare select: text until you hovered it. It read
+   as three loose words sitting under the input, and on a phone — where there
+   is no hover — nothing suggested they could be tapped at all. A pill has an
+   edge, so it looks like a control before you touch it, and the row reads as
+   a small set of settings rather than a caption.
+
+   It is still a real `<select>` underneath, so keyboard, touch and screen
+   readers all work without any code.
 */
 .composer__picker {
   display: inline-flex;
   align-items: center;
   gap: var(--s-1);
-  padding-left: var(--s-2);
-  border-radius: var(--r-md);
-  color: var(--text-subtle);
+  height: 30px;
+  padding-left: var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--bg-inset);
+  color: var(--text-muted);
   cursor: pointer;
-  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease);
 }
-.composer__picker:hover { background: var(--bg-hover); color: var(--text); }
-.composer__picker:focus-within { background: var(--bg-hover); color: var(--text); }
+.composer__picker:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-strong); }
+.composer__picker:focus-within { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-strong); }
 
 .select--bare {
   --field-h: 28px;
   width: auto;
-  max-width: 160px;
+  max-width: 132px;
   min-height: var(--field-h);
-  padding: 0 var(--s-5) 0 var(--s-1);
+  padding: 0 var(--s-5) 0 0;
   background-color: transparent;
   border-color: transparent;
   color: inherit;
   font-size: var(--fs-xs);
+  font-weight: 500;
   line-height: var(--field-h);
-  background-position: right var(--s-1) center;
+  background-position: right var(--s-2) center;
 }
 .select--bare:hover:not(:disabled) { border-color: transparent; }
 .select--bare:focus {
@@ -290,6 +301,18 @@
   .composer__bar { padding: var(--s-1) var(--s-2) var(--s-2); }
   .composer__send { --btn-h: 36px; }
   .select--bare { max-width: 132px; font-size: var(--fs-xs); }
+
+  /* A pill sliced in half by the send button reads as broken, and a phone
+     rarely has room for four of them on one line. So they wrap onto a second
+     row instead of scrolling out of sight — the bar gets taller, which costs
+     nothing, and every control stays whole and reachable. */
+  .composer__tools {
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: var(--s-1);
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
 
   /* Ragged centred buttons read as debris. Two even columns read as a menu. */
   .chat__suggestions {
@@ -502,3 +525,113 @@
 .approval__title { font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong); }
 .approval__what { margin-top: var(--s-2); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
 .approval__actions { margin-top: var(--s-4); display: flex; gap: var(--s-2); }
+
+/* ─── the plan ──────────────────────────────────────────────────────────────
+   One card for the whole run: what was agreed, and how far it has got. The
+   marks move as the agent reports steps, so a long run reads as progress
+   rather than as a stream of tool names. */
+.plan {
+  margin-top: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-inset);
+}
+.plan[data-complete="true"] { border-color: var(--success-quiet); }
+
+.plan__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.plan__label {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.plan__count { font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.plan__summary {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  color: var(--text-muted);
+}
+
+.plan__steps {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.plan__step {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: var(--s-3);
+  align-items: start;
+}
+.plan__mark {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: var(--r-full);
+  color: var(--text-subtle);
+}
+.plan__dot {
+  width: 6px; height: 6px;
+  border-radius: var(--r-full);
+  background: var(--text-disabled);
+}
+/* Only the step being worked on moves. More than one moving thing on a card
+   and the eye has nowhere to rest. */
+.plan__spinner {
+  width: 11px; height: 11px;
+  border: 2px solid var(--accent-line);
+  border-top-color: var(--accent);
+  border-radius: var(--r-full);
+  animation: plan-spin 0.7s linear infinite;
+}
+@keyframes plan-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .plan__spinner { animation: none; border-top-color: var(--accent); }
+}
+
+.plan__title {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  color: var(--text);
+}
+.plan__note { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-muted); }
+.plan__files { margin-top: 2px; font-size: var(--fs-2xs); color: var(--text-subtle); word-break: break-all; }
+
+.plan__step[data-status="done"] .plan__mark { color: var(--success); }
+.plan__step[data-status="done"] .plan__title { color: var(--text-subtle); text-decoration: line-through; text-decoration-thickness: 1px; }
+.plan__step[data-status="in_progress"] .plan__title { color: var(--text-strong); font-weight: 600; }
+.plan__step[data-status="blocked"] .plan__mark { color: var(--danger); }
+.plan__step[data-status="blocked"] .plan__title { color: var(--danger); }
+
+.plan__actions { margin-top: var(--s-4); border-top: 1px solid var(--border); padding-top: var(--s-3); }
+.plan__consent { margin: 0 0 var(--s-3); font-size: var(--fs-xs); line-height: var(--lh-snug); color: var(--text-muted); }
+.plan__consent-limit { color: var(--text-subtle); }
+.plan__buttons { display: flex; gap: var(--s-2); }
+
+/* Off-screen, same box, same font: what a pill's label measures before the
+   select is told how wide to be. Not `display: none` — that has no size. */
+.composer__gauge {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+/* The mode pill carries no icon: its own edge is the affordance, and on a
+   phone eighteen pixels of gear is a fifth of the label beside it. */
+.composer__picker--plain { padding-left: var(--s-3); }

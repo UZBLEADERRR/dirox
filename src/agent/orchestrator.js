@@ -124,6 +124,8 @@ export async function runTask(task, options) {
     sinceProgress: 0,
     /** Delegated runs this task has spawned. */
     children: resumed?.children ?? [],
+    /** Which plan steps have been started, finished or blocked. */
+    planProgress: new Map(Object.entries(resumed?.planProgress ?? {})),
     startedAt: Date.now()
   };
 
@@ -448,9 +450,98 @@ export async function runTask(task, options) {
       }).then(result => result.value);
 
       if (plan) {
-        emit('plan', plan);
         await updateTask(task.id, { plan });
       }
+    }
+
+    /*
+       The plan, as something a person can watch rather than a paragraph that
+       scrolls past.
+
+       `planView` merges the plan with what the run has reported about it. The
+       step index cannot be inferred from the outside — files changed do not
+       map to plan steps — so the agent reports it through `update_plan`, and
+       a progress display that is told the truth beats one that guesses.
+    */
+    const planView = () => {
+      if (!plan?.steps?.length) return null;
+      const steps = plan.steps.map((entry, index) => ({
+        ...entry,
+        number: index + 1,
+        ...(state.planProgress.get(String(index + 1)) ?? { status: 'todo' })
+      }));
+      return {
+        summary: plan.summary,
+        steps,
+        done: steps.filter(entry => entry.status === 'done').length,
+        total: steps.length
+      };
+    };
+
+    const updatePlanStep = ({ step: number, status, note }) => {
+      if (!plan?.steps?.length) return { ok: false, reason: 'This task has no plan.' };
+      if (number < 1 || number > plan.steps.length) {
+        return { ok: false, reason: `The plan has ${plan.steps.length} step(s); there is no step ${number}.` };
+      }
+      state.planProgress.set(String(number), { status, note: note || null });
+      const view = planView();
+      emit('plan', view);
+      return { ok: true, done: view.done, total: view.total };
+    };
+
+    if (plan?.steps?.length) emit('plan', planView());
+
+    /*
+       Asking before starting.
+
+       An agent that begins editing a repository the moment it has an idea is
+       one a person cannot steer. The plan is the cheapest possible moment to
+       disagree: nothing has been written, nothing has been spent beyond the
+       planning call, and the whole shape of the work is on one card.
+
+       So a substantial run stops here and shows it. Saying go carries the run
+       through everything that follows without asking again — which is the
+       point, and only possible because approving now resumes the run rather
+       than starting it over.
+
+       Autopilot does not ask: choosing it *was* the answer to this question.
+    */
+    const wantsConfirmation = plan?.steps?.length >= 2
+      && task.mode !== 'autopilot'
+      && options.confirmPlan !== false
+      && !resumed?.planApproved;
+
+    if (wantsConfirmation) {
+      const approval = {
+        kind: 'plan',
+        description: plan.summary || `${plan.steps.length} steps`,
+        plan: planView()
+      };
+
+      await updateTask(task.id, {
+        status: 'waiting_for_approval',
+        approval,
+        spent_micros: budget.spentMicros,
+        iterations: state.stepIndex,
+        run_state: packRunState(state, {
+          iteration: 0,
+          intent: intent.intent,
+          category: classification.category,
+          level: classification.level,
+          planApproved: false
+        })
+      });
+
+      emit('approval', approval);
+      return {
+        status: 'waiting_for_approval',
+        summary: 'Waiting for you to confirm the plan.',
+        approval,
+        plan: approval.plan,
+        changedFiles: [],
+        budget: budget.toJSON(),
+        iterations: state.stepIndex
+      };
     }
 
     if (task.mode === 'plan') {
@@ -486,7 +577,8 @@ export async function runTask(task, options) {
       includeGitHub: intent.profile.github === true,
       // Depth is spent by delegating: a top-level run has all of it, a
       // sub-agent's run has one less, and at zero the tool is not offered.
-      canDelegate: delegationDepth > 0
+      canDelegate: delegationDepth > 0,
+      hasPlan: Boolean(plan?.steps?.length)
     };
 
     const groupsAvailable = availableGroups(toolOptions);
@@ -549,6 +641,8 @@ export async function runTask(task, options) {
           intent: intent.intent,
           category: classification.category,
           level: classification.level,
+          // Past the gate. A run picked up later must not stop to ask again.
+          planApproved: true,
           finalText,
           pendingCalls
         })
@@ -587,6 +681,8 @@ export async function runTask(task, options) {
            spend all roll up here, so a delegated change is still covered by
            the restore point, the summary and the post-run snapshot.
         */
+        // Progress against the plan, reported rather than guessed.
+        updatePlanStep: plan?.steps?.length ? updatePlanStep : null,
         childCount: () => state.children.length,
         delegate: async delegation => {
           const outcome = await runSubAgent(delegation, {
@@ -986,7 +1082,7 @@ export async function runTask(task, options) {
       deliverables: state.deliverables,
       validation: validation ? { passed: validation.ok, summary: validation.metadata?.summary } : null,
       review: review ? { findings: review.findings.length, summary: summariseFindings(review.findings) } : null,
-      plan,
+      plan: planView() ?? plan,
       model: currentRoute.model.name,
       escalations: state.escalations
     };
