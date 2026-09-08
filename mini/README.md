@@ -38,6 +38,12 @@ yo'q. Node 20+ yetarli.
 
 ### Serverga qo'yish
 
+**Railway** uchun to'liq yo'riqnoma: [DEPLOY.md](DEPLOY.md) — servisga
+`Root Directory = mini` qo'yasiz, `/data` volume ulaysiz va `MINI_DATA=/data`
+deysiz. Boshqa hech narsa kerak emas.
+
+Qo'lda:
+
 ```bash
 MINI_DATA=/var/lib/mini PORT=8080 node server/server.js
 ```

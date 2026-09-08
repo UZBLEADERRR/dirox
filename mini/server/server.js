@@ -220,6 +220,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, '', CORS);
 
   try {
+    if (p === '/api/health') return json(res, 200, {
+      ok: true, apps: state.apps.filter(a => a.status === 'live').length,
+      moderate: MODERATE, uptime: Math.round(process.uptime()),
+    }, { ...CORS, 'Cache-Control': 'no-store' });
     if (p === '/api/market/index.json') return marketIndex(req, res);
     if (p.startsWith('/api/market/app/')) return marketApp(req, res, p.slice(16).replace(/\.json$/, ''));
     if (p === '/api/market/submit' && req.method === 'POST') return submit(req, res);
@@ -412,9 +416,24 @@ function statik(req, res, p) {
   });
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Mini ${PORT}-portda. Ma'lumot: ${DATA}` +
     (MODERATE ? ' | moderatsiya: yoqilgan' : '') + (ADMIN ? ' | admin: yoqilgan' : ''));
 });
+
+/**
+ * A deploy is a SIGTERM away, and install counts live in memory between
+ * flushes. Write them out and stop taking new connections before going.
+ */
+let closing = false;
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    if (closing) process.exit(0);
+    closing = true;
+    if (installsDirty) writeJson(path.join(DATA, 'installs.json'), state.installs);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5000).unref();
+  });
+}
 
 export { server, validate };

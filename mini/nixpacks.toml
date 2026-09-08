@@ -1,0 +1,19 @@
+# Build configuration for Railway's Nixpacks builder.
+#
+# Mini has nothing to build and nothing to install: zero runtime dependencies,
+# no bundler, ES modules served as written. Playwright appears in the test
+# script only, and tests do not run in the container — so this image is Node
+# and nothing else, which is why it is a few tens of megabytes rather than the
+# few hundred a browser would cost.
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["echo 'no dependencies'"]
+
+[phases.build]
+cmds = ["echo 'nothing to build'"]
+
+[start]
+cmd = "node server/server.js"
