@@ -5,7 +5,8 @@ import { t } from '../i18n.js';
 import { listModels } from '../llm.js';
 import { PALETTE, EMOJIS, iconDataUrl, applyAppIdentity } from '../icons.js';
 import { $, el, openSheet, closeSheet, confirmSheet, switchRow, field, toast, fmtBytes,
-         ICON, svg, iconTile } from './dom.js';
+         ICON, svg, iconTile, appIcon, readImage } from './dom.js';
+import { session } from '../auth.js';
 
 const PROVIDERS = [
   ['OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
@@ -39,8 +40,18 @@ export function openSettings(afterChange) {
         rerender();
       }})));
 
+    const free = session.free;
     return [
       el('h3', { text:t('settings') }),
+
+      free ? el('div', {},
+        el('h4', { text:'Free model' }),
+        el('div', { class:'note', style:{ marginBottom:'10px' },
+          text:`${free.label} — ${free.left} of ${free.perDay} messages left today. ` +
+               'Paid for by whoever runs this server. Add your own key for no limit.' }),
+        switchRow('Use the free model', free.model, !!s.useFree, v => {
+          s.useFree = v; save(); afterChange?.();
+        })) : null,
 
       el('h4', { text:'API' }),
       provRow,
@@ -281,32 +292,54 @@ export function openRoleEditor(role, after) {
 export function openPublish(project, existing, onDone) {
   const draft = {
     id: existing?.id || null,
-    name: existing?.name || 'Mini ilova',
-    emoji: existing?.emoji || '📱',
+    name: existing?.name || project.course?.title || project.book?.title || 'Mini app',
+    emoji: existing?.emoji || (project.course ? '🎓' : project.book ? '📖' : '📱'),
     color: existing?.color || PALETTE[0],
+    iconImage: existing?.iconImage || null,
     deviceAccess: existing?.deviceAccess || false,
   };
 
   openSheet(() => {
-    const preview = el('div', { class:'app-ico', style:{ background:draft.color }, text:draft.emoji });
+    const shell = el('div', { class:'center', style:{ padding:'4px 0 16px' } });
     const name = el('input', { value:draft.name, maxlength:'24' });
     name.addEventListener('input', () => { draft.name = name.value; });
 
     const emojiPick = el('div', { class:'emoji-grid' });
     const colorPick = el('div', { class:'color-grid' });
+    const picker = el('input', { type:'file', accept:'image/*', hidden:true });
+    picker.addEventListener('change', async e => {
+      const f = e.target.files?.[0];
+      e.target.value = '';
+      if (!f) return;
+      try {
+        // Square, small and compressed: it is drawn at 60px and has to live
+        // in localStorage next to everything else.
+        draft.iconImage = await readImage(f, 256, 0.82);
+        paint();
+      } catch { toast(t('error')); }
+    });
+
     const paint = () => {
+      shell.innerHTML = '';
+      shell.append(appIcon(draft));
       emojiPick.innerHTML = ''; colorPick.innerHTML = '';
-      EMOJIS.forEach(e => emojiPick.append(el('button', { class:e === draft.emoji ? 'on' : '', text:e,
-        onClick:() => { draft.emoji = e; preview.textContent = e; paint(); } })));
+      EMOJIS.forEach(e => emojiPick.append(el('button', { class:e === draft.emoji && !draft.iconImage ? 'on' : '',
+        text:e, onClick:() => { draft.emoji = e; draft.iconImage = null; paint(); } })));
       PALETTE.forEach(c => colorPick.append(el('button', { class:c === draft.color ? 'on' : '',
-        style:{ background:c }, onClick:() => { draft.color = c; preview.style.background = c; paint(); } })));
+        style:{ background:c }, onClick:() => { draft.color = c; paint(); } })));
     };
     paint();
 
     return [
       el('h3', { text: existing ? t('update') : t('publish') }),
-      el('div', { class:'center', style:{ padding:'4px 0 16px' } }, preview),
+      shell,
       field(t('appName'), name),
+      el('div', { class:'btn-row', style:{ margin:'0 0 12px' } },
+        el('button', { class:'btn', onClick:() => picker.click() }, svg(ICON.image), 'Use a picture'),
+        draft.iconImage
+          ? el('button', { class:'btn', onClick:() => { draft.iconImage = null; paint(); } }, 'Use an emoji')
+          : null),
+      picker,
       field(t('icon'), emojiPick),
       field(t('color'), colorPick),
       switchRow(t('deviceAccess'), t('deviceWarn'), draft.deviceAccess, async v => {
@@ -344,9 +377,8 @@ export function openCode(files) {
 /** `draft` = not published yet, so there is nothing to share, pin or delete. */
 export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint, draft = false } = {}) {
   if (draft) return openSheet(() => [
-    el('div', { class:'center', style:{ padding:'4px 0 14px' } },
-      el('div', { class:'app-ico', style:{ background:app.color || '#7c8cff', margin:'0 auto' },
-        text:app.emoji || '📱' }),
+    el('div', { class:'center sheet-hero' },
+      appIcon(app),
       el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name || 'App' })),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onPrint?.(); } },
       iconTile(ICON.printer), el('span', { class:'txt' }, el('b', { text:t('print') }))),
@@ -357,8 +389,8 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint,
   ]);
 
   openSheet(() => [
-    el('div', { class:'center', style:{ padding:'4px 0 14px' } },
-      el('div', { class:'app-ico', style:{ background:app.color, margin:'0 auto' }, text:app.emoji }),
+    el('div', { class:'center sheet-hero' },
+      appIcon(app),
       el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name })),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onOpen?.(); } },
       iconTile(ICON.play), el('span', { class:'txt' }, el('b', { text:t('open') }))),

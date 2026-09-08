@@ -1,12 +1,13 @@
 /** The chat screen: messages, the composer, and the agent turn it drives. */
 
 import { state, save, activeChat, touch, getRole, getApp, publishApp } from '../store.js';
+import { session } from '../auth.js';
 import { t } from '../i18n.js';
 import { md } from '../md.js';
 import { Agent } from '../agent.js';
 import { openPublish, openSettings } from './sheets.js';
 import { openPublishToMarket } from './market.js';
-import { $, el, toast, readImage, svg, ICON } from './dom.js';
+import { $, el, toast, readImage, svg, ICON, appIcon } from './dom.js';
 import { extractText, ExtractError, EXTRACT_MESSAGES } from '../extract.js';
 
 let agent = null, pending = [];         // pending = attached images for the next send
@@ -35,9 +36,11 @@ export function renderChat() {
   scrollDown(true);
 }
 
+const canTalk = () => !!(state.settings.apiKey || (state.settings.useFree && session.free));
+
 function emptyState(chat) {
   const s = state.settings;
-  if (!s.apiKey) {
+  if (!canTalk()) {
     return el('div', { class:'empty' },
       el('img', { class:'empty-mark', src:'assets/mark.png', alt:'' }),
       el('h2', { text:t('noKeyTitle') }),
@@ -94,7 +97,7 @@ function artifactCard(chat) {
 
   return el('div', { class:'artifact' },
     el('div', { class:'artifact-head' },
-      el('div', { class:'artifact-ico', style:{ background:color }, text:emoji }),
+      appIcon({ emoji, color, iconImage: app?.iconImage }, 'artifact-ico'),
       el('div', { class:'artifact-meta' },
         el('b', { text:name }),
         el('span', { text: detail }))),
@@ -190,8 +193,8 @@ export async function send() {
   if (!text && !pending.length) return;
 
   const s = state.settings;
-  if (!s.apiKey) return openSettings(renderChat);
-  if (!s.model)  { toast(t('chooseModel')); return openSettings(renderChat); }
+  if (!canTalk()) return openSettings(renderChat);
+  if (!s.model && !s.useFree) { toast(t('chooseModel')); return openSettings(renderChat); }
 
   const chat = activeChat();
   const role = getRole(chat.roleId);

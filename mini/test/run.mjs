@@ -371,10 +371,11 @@ group('Market: someone else installs it');
 {
   const { page, ctx, errs } = await newPage(seed());
   await page.click('#tab-market');
-  await page.waitForSelector('.mk-row', { timeout: 20000 });
-  ok('it is listed', (await page.textContent('.mk-row b')) === 'Calculator');
+  await page.waitForSelector('.mk-card', { timeout: 20000 });
+  ok('it is listed', (await page.textContent('.mk-card b')) === 'Calculator');
+  ok('the card shows an install count', await page.isVisible('.mk-installs'));
 
-  await page.click('.mk-row .mk-get');                     // OLISH
+  await page.click('.mk-card .mk-get');                    // GET
   await page.waitForTimeout(1500);
   const apps = await page.evaluate(() => JSON.parse(localStorage['mini.v1']).apps);
   ok('the app was installed', apps.length === 1 && apps[0].marketId === publishedId,
@@ -385,6 +386,27 @@ group('Market: someone else installs it');
   await page.waitForTimeout(3400);            // counts are coalesced server-side
   const cat = await marketApi('/api/market/index.json');
   ok('the install count went up', cat.apps[0].installs >= 1, String(cat.apps[0].installs));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+group('Market: the detail sheet runs the app before you take it');
+{
+  const { page, ctx, errs } = await newPage(seed());
+  await page.click('#tab-market');
+  await page.waitForSelector('.mk-card', { timeout: 20000 });
+  await page.click('.mk-card b');
+  await page.waitForSelector('.mk-preview', { timeout: 15000 });
+  await page.waitForTimeout(1600);
+
+  ok('a live preview is mounted', await page.locator('.mk-stage iframe').isVisible());
+  const pv = page.frameLocator('.mk-stage iframe');
+  ok('the preview really runs', (await pv.locator('#out').textContent()) === '0',
+     await pv.locator('#out').textContent());
+  await pv.locator('button', { hasText:'7' }).click();
+  await page.waitForTimeout(250);
+  ok('you can try it before installing', (await pv.locator('#out').textContent()) === '7');
+  ok('the author is shown', (await page.textContent('#sheet-body')).includes('Tester'));
   ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -424,7 +446,72 @@ group('Market: shared links and server validation');
   ok('an unreviewed app is refused', r3.status === 400 && /review/.test(r3.body.error), JSON.stringify(r3));
 }
 
-/* --------------------------------------------- 9. the inactivity rule */
+/* ------------------------------------------------- 9. the free model */
+
+group('Free model: the operator pays, the server holds the key');
+{
+  const admin = (body) => fetch(ORIGIN + '/api/admin/config', {
+    method:'POST', headers:{ 'Content-Type':'application/json', 'X-Admin-Token':'test-admin' },
+    body: JSON.stringify(body) }).then(r => r.json());
+
+  const before = await fetch(ORIGIN + '/api/config').then(r => r.json());
+  ok('nothing is offered until an operator sets it', before.free === null, JSON.stringify(before));
+
+  const set = await admin({ baseUrl: API, key:'server-side-secret', model:'mock/fast',
+                            label:'House model', perDay: 5 });
+  ok('the admin can configure one', set.free?.model === 'mock/fast', JSON.stringify(set));
+  ok('the key is never handed back', !JSON.stringify(set).includes('server-side-secret'));
+
+  const acct = await makeAccount('Freeloader', 'freeuser');
+  // A brand new person with no API key of their own.
+  const state = seed();
+  delete state.settings.apiKey;
+  delete state.settings.model;
+  const { page, ctx, errs } = await newPage(state, acct);
+  await page.waitForTimeout(700);
+
+  const chosen = await page.evaluate(() => JSON.parse(localStorage['mini.v1']).settings.useFree);
+  ok('a keyless account is switched onto it', chosen === true, String(chosen));
+  ok('the composer is usable', await page.isVisible('#composer'));
+
+  await buildApp(page);
+  ok('it can build with no key at all', await page.isVisible('.artifact'));
+
+  const me = await fetch(ORIGIN + '/api/auth/me', {
+    headers:{ Authorization:'Bearer ' + acct.token } }).then(r => r.json());
+  ok('usage is counted against the account', me.free.used >= 1, JSON.stringify(me.free));
+  ok('a daily cap is reported', me.free.perDay === 5, JSON.stringify(me.free));
+
+  await page.click('#btn-menu'); await page.waitForTimeout(250);
+  await page.click('#btn-settings'); await page.waitForTimeout(400);
+  const sheet = await page.textContent('#sheet-body');
+  ok('the settings sheet names the model', sheet.includes('House model'), sheet.slice(0, 120));
+  ok('and says what is left today', /of 5 messages left today/.test(sheet), sheet.slice(0, 200));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+
+  // Spend the rest of the allowance and check the wall.
+  for (let i = 0; i < 6; i++) {
+    await fetch(ORIGIN + '/api/ai/chat', {
+      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + acct.token },
+      body: JSON.stringify({ messages:[{ role:'user', content:'hi' }] }) }).then(r => r.text());
+  }
+  const over = await fetch(ORIGIN + '/api/ai/chat', {
+    method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + acct.token },
+    body: JSON.stringify({ messages:[{ role:'user', content:'hi' }] }) });
+  ok('the cap is enforced', over.status === 429, String(over.status));
+
+  const anon = await fetch(ORIGIN + '/api/ai/chat', {
+    method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ messages:[{ role:'user', content:'hi' }] }) });
+  ok('it is not open to strangers', anon.status === 401, String(anon.status));
+
+  await admin({ clear: true });
+  const after = await fetch(ORIGIN + '/api/config').then(r => r.json());
+  ok('the operator can turn it off again', after.free === null, JSON.stringify(after));
+}
+
+/* --------------------------------------------- 10. the inactivity rule */
 
 group('The inactivity rule');
 {

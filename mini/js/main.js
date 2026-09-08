@@ -8,7 +8,7 @@ import { initApps, renderApps, openApp, closeApp } from './ui/apps.js';
 import { initMarket, renderMarket, bindMarketControls, openSharedApp, openPublishToMarket } from './ui/market.js';
 import { openDrawer, closeDrawer, renderDrawer, startNewChat } from './ui/drawer.js';
 import { showAuth, hideAuth, bindAuth, openAccount } from './ui/auth.js';
-import { signedIn, refresh, displayName } from './auth.js';
+import { signedIn, refresh, displayName, session } from './auth.js';
 import { $, $$, el, toast, openSheet, closeSheet, sheetOpen, readImage,
          pushHistory as push, popHistory as back, notePop, resetHistory } from './ui/dom.js';
 
@@ -96,12 +96,23 @@ function start() {
    and runs entirely on this phone. Everything else waits for a sign-in. */
 if (signedIn() || deepAppId) {
   start();
-  refresh().then(user => {
-    if (!user && !deepAppId) { hideAuth(); showAuth(() => location.reload()); }
-    else renderDrawer();
-  });
+  refresh().then(afterRefresh);
 } else {
-  showAuth(() => { start(); refresh().then(renderDrawer); });
+  showAuth(() => { start(); refresh().then(afterRefresh); });
+}
+
+/**
+ * Someone who has not brought a key has nothing to try the product with, so
+ * if the server runs a model of its own, they start on that.
+ */
+function afterRefresh(user) {
+  if (!user && !deepAppId) { hideAuth(); return showAuth(() => location.reload()); }
+  if (session.free && !state.settings.apiKey && !state.settings.useFree) {
+    state.settings.useFree = true;
+    save();
+  }
+  renderDrawer();
+  renderChat();
 }
 
 /* --------------------------------------------------------------- screens */

@@ -21,7 +21,8 @@ Ikkita ekran, bitta tugma bilan almashadi:
 | AI bilan ilova yasaysiz | Odamlar yasagan ilovalarni o'rnatasiz |
 
 Kirish uchun ism, username va parol — boshqa hech narsa so'ralmaydi. Keyin
-foydalanuvchi o'z API kalitini kiritadi va istagan modelini tanlaydi. Chat,
+foydalanuvchi o'z API kalitini kiritadi va istagan modelini tanlaydi (yoki
+server egasi qo'ygan **bepul modeldan** foydalanadi). Chat,
 ilovalar va sozlamalar faqat o'sha telefonda — `localStorage`da — turadi;
 serverda faqat akkaunt va market.
 
@@ -61,6 +62,7 @@ Old tomonga nginx yoki Caddy qo'ying va HTTPS bering — servis ishchisi va
 | `MINI_INACTIVE_DAYS` | necha kun jimlikdan keyin akkaunt o'chadi (30) |
 | `MINI_SECRET` | sessiya imzo kaliti (qo'yilmasa `MINI_DATA` ichida yasaladi) |
 | `MINI_REGS_PER_HOUR` | bir IP dan soatiga nechta ro'yxatdan o'tish (10) |
+| `MINI_FREE_KEY` / `MINI_FREE_MODEL` / `MINI_FREE_PER_DAY` | server egasi to'laydigan model |
 | `MINI_MODERATE` | `1` bo'lsa ilovalar admin tasdig'ini kutadi |
 | `MINI_ADMIN_TOKEN` | `/api/admin/*` ni yoqadi |
 
@@ -123,16 +125,33 @@ allaqachon o'rnatilgan va butunlay telefonda ishlaydi.
 
 ---
 
+## Bepul model
+
+Kaliti yo'q odam ilovani sinab ko'ra olmaydi — shuning uchun server egasi
+bitta modelni server orqasiga qo'ya oladi. Kalit brauzerga chiqmaydi:
+mijoz `/api/ai/chat` ga yozadi, server o'z kaliti bilan provayderga uzatadi
+va javob oqimini qaytaradi. Har bir akkauntga kunlik xabar chegarasi
+qo'yiladi (`perDay`). O'z kalitini qo'ygan user chegarasiz ishlaydi.
+
+Sozlash: [DEPLOY.md](DEPLOY.md#bepul-model-sizning-hisobingizdan).
+
+---
+
 ## Marketga qanday tushadi
 
 1. Foydalanuvchi ilovani yasaydi va **Marketga joylash** ni bosadi (kirgan
    bo'lishi kerak).
-2. **AI ko'rib chiqadi** (uning o'z modeli bilan): ishlaydimi, tugallanganmi,
-   foydalimi. Axlat, namuna, spam yoki nomaqbul narsa — rad etiladi.
+2. **Ilova avval haqiqatan ishga tushiriladi**, so'ng AI o'sha ishga tushirish
+   hisoboti asosida qaror qiladi: ishlaydimi, tugallanganmi, foydalimi. Kod
+   qisqartirilgan bo'lsa ham bu ayb hisoblanmaydi — modelga shu aniq
+   aytilgan. Axlat, namuna, spam yoki nomaqbul narsa rad etiladi.
 3. **Kategoriyani AI belgilaydi.** Mavjudlaridan mosini tanlaydi, mos kelmasa
    yangisini yaratadi — «O'yinlar», «Asboblar», «Moliya» va hokazo.
 4. Server o'z tekshiruvini o'tkazadi va saqlaydi.
-5. Ilova ro'yxatga tushadi; har kim **OLISH** ni bosib o'rnatadi.
+5. Ilova market kartalarida paydo bo'ladi. Ustiga bosgan odam uni **shu
+   yerda ishlatib ko'radi** — jonli nusxa kartochka ichida ochiladi — keyin
+   **GET** ni bosib o'rnatadi. Kurslar va kitoblar ham xuddi shunday
+   joylanadi va o'z belgisi bilan ko'rinadi.
 
 **Kuniga bitta ilova.** Chegara akkaunt bo'yicha, IP esa faqat toshqinga
 qarshi (`MINI_MAX_PER_IP`) — operator NAT'i orqasida bir necha shahar bitta

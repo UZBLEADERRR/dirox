@@ -53,6 +53,10 @@ Servis → **Variables**:
 | `MINI_INACTIVE_DAYS` | `30` | necha kun jimlikdan keyin akkaunt o'chadi |
 | `MINI_SECRET` | uzun tasodifiy satr | sessiya imzo kaliti — pastdagi izohni o'qing |
 | `MINI_REGS_PER_HOUR` | `10` | bir IP dan soatiga nechta ro'yxatdan o'tish |
+| `MINI_FREE_KEY` | API kalitingiz | bepul model yoqiladi (pastga qarang) |
+| `MINI_FREE_MODEL` | `openai/gpt-4o-mini` | qaysi model |
+| `MINI_FREE_BASE_URL` | `https://openrouter.ai/api/v1` | qaysi provayder |
+| `MINI_FREE_PER_DAY` | `30` | bir userga kuniga nechta xabar |
 
 `PORT` ni **qo'ymang** — Railway o'zi beradi, server o'zi o'qiydi.
 
@@ -103,6 +107,38 @@ aytiladi.
 **30 kun kirilmagan akkaunt avtomatik o'chiriladi.** Server buni har soatda
 tekshiradi. Marketga joylangan ilovalar qoladi — ularni odamlar o'rnatgan.
 Muddatni `MINI_INACTIVE_DAYS` bilan o'zgartirasiz.
+
+---
+
+## Bepul model (sizning hisobingizdan)
+
+Kaliti yo'q odam ilovada hech narsa qila olmaydi. Shuning uchun **siz bitta
+modelni server orqasiga qo'yishingiz mumkin** — kalit brauzerga hech qachon
+chiqmaydi, so'rov `/api/ai/chat` orqali o'tadi va har bir userga kunlik
+chegara qo'yiladi.
+
+O'zgaruvchilar bilan yoki ishlab turgan serverda admin orqali:
+
+```bash
+TOKEN=...; HOST=https://SIZNING-DOMEN
+
+curl -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"baseUrl":"https://openrouter.ai/api/v1","key":"sk-or-...",
+       "model":"google/gemini-2.0-flash-001","label":"Free model","perDay":30}' \
+  $HOST/api/admin/config
+
+curl -H "X-Admin-Token: $TOKEN" $HOST/api/admin/config     # holatni ko'rish
+curl -X POST -H "X-Admin-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"clear":true}' $HOST/api/admin/config               # o'chirish
+```
+
+Yoqilgach: kaliti yo'q har bir yangi user avtomatik shu modelga tushadi va
+Sozlamalarda «bugun nechta xabar qoldi» ni ko'rib turadi. Kalitini qo'ygan
+user chegarasiz ishlaydi.
+
+**Xarajatni nazorat qilish:** `perDay` (kuniga xabar) × faol userlar soni.
+Arzon modelni tanlang — `perDay: 20` va gemini-flash bilan bir user kuniga
+bir tiyinlik chiqadi. `/api/config` kalitni hech qachon qaytarmaydi.
 
 ---
 

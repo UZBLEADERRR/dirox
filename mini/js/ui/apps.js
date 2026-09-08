@@ -5,7 +5,7 @@ import { t } from '../i18n.js';
 import { mount, printableHtml } from '../sandbox.js';
 import { restoreIdentity, applyAppIdentity } from '../icons.js';
 import { openAppMenu } from './sheets.js';
-import { $, el, svg, ICON, pushHistory, toast } from './dom.js';
+import { $, el, svg, ICON, pushHistory, toast, appIcon } from './dom.js';
 
 let running = null;
 let hooks = {};
@@ -27,7 +27,7 @@ export function renderApps() {
   for (const app of state.apps) {
     let held = false, timer = null;
     const tile = el('button', { class:'app-tile' },
-      el('div', { class:'app-ico', style:{ background:app.color || '#7c8cff' }, text:app.emoji || '📱' }),
+      appIcon(app),
       el('span', { text:app.name }));
 
     const menu = () => openAppMenu(app, {

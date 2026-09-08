@@ -4,7 +4,8 @@ import { state, publishApp } from '../store.js';
 import { session, signedIn, refresh } from '../auth.js';
 import { t } from '../i18n.js';
 import * as api from '../market.js';
-import { $, el, svg, ICON, openSheet, closeSheet, toast } from './dom.js';
+import { $, el, svg, ICON, openSheet, closeSheet, toast, appIcon } from './dom.js';
+import { mount } from '../sandbox.js';
 import { openAddToHome } from './sheets.js';
 
 let cat = null, query = '', data = null, loading = false, hooks = {};
@@ -62,18 +63,16 @@ export async function renderMarket({ refresh = false } = {}) {
     return;
   }
 
-  const list = el('div', { class:'market-list' });
+  const grid = (items) => el('div', { class:'mk-grid' }, ...items.map(card));
   if (!q && !cat) {
-    list.append(el('div', { class:'mk-section', text:t('popular') }));
-    for (const a of rows.slice(0, 8)) list.append(row(a));
-    if (rows.length > 8) {
-      list.append(el('div', { class:'mk-section', text:t('newest') }));
-      for (const a of [...rows].sort((x, y) => y.createdAt - x.createdAt).slice(0, 20)) list.append(row(a));
+    body.append(el('div', { class:'mk-section', text:t('popular') }), grid(rows.slice(0, 6)));
+    if (rows.length > 6) {
+      const fresh = [...rows].sort((x, y) => y.createdAt - x.createdAt).slice(0, 20);
+      body.append(el('div', { class:'mk-section', text:t('newest') }), grid(fresh));
     }
   } else {
-    for (const a of rows.slice(0, 60)) list.append(row(a));
+    body.append(grid(rows.slice(0, 60)));
   }
-  body.append(list);
 }
 
 function hero() {
@@ -85,7 +84,10 @@ function hero() {
       el('button', { class:'btn', text:t('heroCta'), onClick:() => hooks.goChat?.() })));
 }
 
-function row(a) {
+const TYPE_LABEL = { course:'Course', book:'Book' };
+
+/** One tile in the market grid — the shape a store shelf has. */
+function card(a) {
   const installed = api.isInstalled(a.id);
   const get = el('button', { class:`mk-get ${installed ? 'done' : ''}`,
     text: installed ? t('open') : t('get') });
@@ -94,30 +96,54 @@ function row(a) {
     installed ? openInstalled(a.id) : install(a, get);
   });
 
-  return el('button', { class:'mk-row', onClick:() => openDetail(a) },
-    el('div', { class:'mk-ico', style:{ background:a.color || 'var(--accent)' }, text:a.emoji || '📦' }),
-    el('div', { class:'mk-body' },
-      el('b', { text:a.name }),
-      el('small', { text:a.summary || a.catName || '' }),
-      el('div', { class:'meta' },
-        el('span', { text:`⬇ ${fmtCount(a.installs)}` }),
-        el('span', { text:fmtSize(a.size) }),
-        a.catName ? el('span', { text:a.catName }) : null)),
-    get);
+  return el('button', { class:'mk-card', onClick:() => openDetail(a) },
+    el('div', { class:'mk-top' },
+      appIcon(a, 'mk-ico'),
+      TYPE_LABEL[a.type] ? el('span', { class:'pill red', text:TYPE_LABEL[a.type] }) : null),
+    el('b', { text:a.name }),
+    el('small', { text:a.summary || a.catName || '' }),
+    el('div', { class:'mk-foot' },
+      el('span', { class:'mk-installs' }, svg(ICON.download), fmtCount(a.installs)),
+      get));
 }
 
 /* --------------------------------------------------------------- detail */
 
 export async function openDetail(a) {
+  let running = null;
+
   openSheet(() => [
     el('div', { class:'center', style:{ padding:'6px 0 4px' } },
-      el('div', { class:'mk-ico', style:{ background:a.color || 'var(--accent)', margin:'0 auto',
-        width:'76px', height:'76px', borderRadius:'21px', fontSize:'38px' }, text:a.emoji || '📦' }),
+      appIcon(a, 'mk-ico big'),
       el('h3', { class:'center', style:{ marginBottom:'2px' }, text:a.name }),
       el('div', { style:{ color:'var(--muted)', fontSize:'13px' },
-        text:`${a.catName || ''} · ${a.author || 'anonim'}${a.authorUsername ? ' @' + a.authorUsername : ''}` })),
+        text:`${TYPE_LABEL[a.type] || 'App'} · ${a.catName || ''} · ${a.author || 'anonymous'}` })),
 
     a.summary ? el('p', { class:'note', style:{ marginTop:'14px' }, text:a.summary }) : null,
+
+    // A live copy, running right there, so nobody installs on faith.
+    (() => {
+      const frame = el('div', { class:'mk-preview' },
+        el('div', { class:'mk-preview-load' }, el('span', { class:'spinner' })));
+      (async () => {
+        try {
+          const full = await api.loadApp(a.id);
+          frame.innerHTML = '';
+          const stage = el('div', { class:'mk-stage' });
+          frame.append(stage);
+          running = mount(stage, full, { appId:'preview-' + a.id });
+          // The frame is a 390px phone scaled to whatever width the sheet has.
+          const fit = () => frame.style.setProperty('--pv-scale',
+            String(Math.min(1, frame.clientWidth / 390)));
+          fit();
+          new ResizeObserver(fit).observe(frame);
+        } catch {
+          frame.innerHTML = '';
+          frame.append(el('div', { class:'mk-preview-load', text:'Preview unavailable' }));
+        }
+      })();
+      return el('div', {}, el('h4', { text:'Preview' }), frame);
+    })(),
 
     el('div', { class:'stat-row' },
       el('div', { class:'stat' }, el('b', { text:fmtCount(a.installs) }), el('small', { text:t('installs') })),
@@ -135,7 +161,7 @@ export async function openDetail(a) {
       installButton(a)),
 
     el('button', { class:'btn', style:{ marginTop:'9px' }, text:t('share'), onClick:() => shareApp(a) }),
-  ]);
+  ], { onClose: () => { running?.destroy(); running = null; } });
 }
 
 function installButton(a) {
@@ -158,7 +184,7 @@ async function install(a, button) {
   try {
     const full = await api.loadApp(a.id);
     const app = publishApp({
-      name: full.name, emoji: full.emoji, color: full.color,
+      name: full.name, emoji: full.emoji, color: full.color, iconImage: full.iconImage,
       files: full.files, assets: full.assets, deviceAccess: false,
       marketId: a.id,
     });
@@ -181,7 +207,7 @@ async function preview(a) {
     const full = await api.loadApp(a.id);
     closeSheet();
     hooks.openApp?.({ id:'market-' + a.id, name:full.name, emoji:full.emoji, color:full.color,
-                      files:full.files, assets:full.assets, deviceAccess:false });
+                      iconImage:full.iconImage, files:full.files, assets:full.assets, deviceAccess:false });
   } catch (e) { toast(`${t('error')}: ${e.message}`); }
 }
 
@@ -217,7 +243,7 @@ export async function openPublishToMarket(project, meta) {
   const s = state.settings;
 
   if (!signedIn()) return toast(t('loginToPublish'));
-  if (!s.apiKey || !s.model) return toast(t('noKeyTitle'));
+  if (!s.apiKey && !(s.useFree && session.free)) return toast(t('noKeyTitle'));
 
   await refresh();                         // the server owns the daily count
   if (api.publishedToday())

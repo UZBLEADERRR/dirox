@@ -67,6 +67,7 @@ export async function refresh() {
     const r = await call('me', null, 'GET');
     session.user = r.user;
     session.quota = r.quota;
+    session.free = r.free || null;      // the operator's model, if they run one
     persist();
     return r.user;
   } catch (e) {

@@ -53,6 +53,15 @@ export const countInstall = id =>
 
 export const remoteQuota = () => api('/api/market/quota').catch(() => null);
 
+/** What the server offers for free, if anything. Fetched once per load. */
+let configPromise = null;
+export function serverConfig() {
+  configPromise ||= fetch(marketBase() + '/api/config')
+    .then(r => r.json())
+    .catch(() => ({ free: null }));
+  return configPromise;
+}
+
 /* ------------------------------------------------------------ publishing */
 
 const REVIEW_PROMPT = `You are the moderator of an app store. You are reviewing a mini app someone built.
@@ -143,7 +152,8 @@ export function publish({ project, meta, review }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: meta.name, emoji: meta.emoji, color: meta.color,
+      name: meta.name, emoji: meta.emoji, color: meta.color, iconImage: meta.iconImage || null,
+      type: project.course ? 'course' : project.book ? 'book' : 'app',
       files: project.files, assets: project.assets || [],
       review,
     }),

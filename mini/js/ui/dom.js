@@ -18,6 +18,18 @@ export function el(tag, props = {}, ...kids) {
   return n;
 }
 
+/**
+ * An app's icon: the picture it was given, or its emoji on its colour.
+ * One helper so a home-screen tile, a market card and a sheet header cannot
+ * drift apart.
+ */
+export function appIcon(app, cls = 'app-ico') {
+  const node = el('div', { class:cls, style:{ background: app.color || 'var(--accent)' } });
+  if (app.iconImage) node.append(el('img', { src:app.iconImage, alt:'' }));
+  else node.textContent = app.emoji || '📱';
+  return node;
+}
+
 /** A list-row icon: the mark in a soft tile, instead of a stock emoji. */
 export function iconTile(path, tone = '') {
   return el('span', { class:`li-ic ${tone}` }, svg(path));

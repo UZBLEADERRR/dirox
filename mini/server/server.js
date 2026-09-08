@@ -22,6 +22,10 @@
  *   MINI_INACTIVE_DAYS days of silence before an account is deleted (30)
  *   MINI_SECRET        session signing key (generated into MINI_DATA if unset)
  *   MINI_REGS_PER_HOUR sign-ups allowed per address per hour (10)
+ *   MINI_FREE_BASE_URL, MINI_FREE_KEY, MINI_FREE_MODEL, MINI_FREE_LABEL,
+ *   MINI_FREE_PER_DAY  a model the operator pays for, offered to signed-in
+ *                      users who have not brought a key of their own. Can also
+ *                      be set at runtime through /api/admin/config.
  */
 
 import http from 'node:http';
@@ -62,6 +66,27 @@ for (const dir of [DATA, APPS]) fs.mkdirSync(dir, { recursive: true });
 
 const auth = new Auth(DATA, { inactiveDays: INACTIVE_DAYS, secret: process.env.MINI_SECRET });
 
+/**
+ * The operator's own model, billed to them.
+ *
+ * Someone arriving with no API key has nothing to try the product with, so an
+ * operator can put one model behind the server and cap how much of it each
+ * person gets in a day. The key never leaves this process: the client posts to
+ * /api/ai/chat and the upstream response is piped straight back.
+ */
+const freeFile = path.join(DATA, 'config.json');
+let free = readJson(freeFile, null) || (process.env.MINI_FREE_KEY ? {
+  baseUrl: process.env.MINI_FREE_BASE_URL || 'https://openrouter.ai/api/v1',
+  key: process.env.MINI_FREE_KEY,
+  model: process.env.MINI_FREE_MODEL || '',
+  label: process.env.MINI_FREE_LABEL || 'Free model',
+  perDay: Number(process.env.MINI_FREE_PER_DAY || 30),
+} : null);
+
+const freePublic = () => (free?.key && free.model
+  ? { model: free.model, label: free.label || 'Free model', perDay: free.perDay || 30 }
+  : null);
+
 const state = {
   apps: readJson(path.join(DATA, 'apps.json'), []),        // catalogue rows
   limits: readJson(path.join(DATA, 'limits.json'), {}),    // device/ip -> day count
@@ -85,6 +110,7 @@ function rebuild() {
     apps: live
       .map(a => ({ id:a.id, name:a.name, emoji:a.emoji, color:a.color, cat:a.cat, catName:a.catName,
                    summary:a.summary, author:a.author, authorUsername:a.authorUsername,
+                   type:a.type || 'app', iconImage:a.iconImage || null,
                    tags:a.tags, size:a.size, v:a.v,
                    installs:(state.installs[a.id] || 0) + (a.installs || 0), createdAt:a.createdAt }))
       .sort((x, y) => y.installs - x.installs || y.createdAt - x.createdAt),
@@ -224,8 +250,11 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p === '/api/health') return json(res, 200, {
       ok: true, apps: state.apps.filter(a => a.status === 'live').length,
-      moderate: MODERATE, uptime: Math.round(process.uptime()),
+      moderate: MODERATE, free: !!freePublic(), uptime: Math.round(process.uptime()),
     }, { ...CORS, 'Cache-Control': 'no-store' });
+    if (p === '/api/config') return json(res, 200, { free: freePublic() },
+      { ...CORS, 'Cache-Control': 'public, max-age=60' });
+    if (p === '/api/ai/chat' && req.method === 'POST') return relay(req, res);
     if (p.startsWith('/api/auth/')) return authRoute(req, res, p.slice(10));
     if (p === '/api/market/index.json') return marketIndex(req, res);
     if (p.startsWith('/api/market/app/')) return marketApp(req, res, p.slice(16).replace(/\.json$/, ''));
@@ -268,9 +297,13 @@ async function authRoute(req, res, action) {
 
   if (action === 'me' && req.method === 'GET') {
     const { used } = quotaState(user);
+    const day = today();
+    const aiUsed = user.aiDay === day ? (user.aiCount || 0) : 0;
     return json(res, 200, {
       user: auth.publicUser(user),
       quota: { perDay: PER_DAY, used, left: Math.max(0, PER_DAY - used) },
+      free: freePublic() && { ...freePublic(), used: aiUsed,
+                              left: Math.max(0, (freePublic().perDay) - aiUsed) },
     }, { ...CORS, 'Cache-Control': 'no-store' });
   }
 
@@ -287,6 +320,62 @@ async function authRoute(req, res, action) {
   }
 
   json(res, 404, { error: 'not found' }, CORS);
+}
+
+/* ---------------------------------------------------------------- relay */
+
+const FREE_DAY = () => today();
+
+async function relay(req, res) {
+  const user = bearer(req);
+  if (!user) return json(res, 401, { error: 'sign in required' }, CORS);
+  if (!free?.key || !free.model)
+    return json(res, 503, { error: 'No free model is configured on this server.' }, CORS);
+
+  const day = FREE_DAY();
+  const used = user.aiDay === day ? (user.aiCount || 0) : 0;
+  const cap = free.perDay || 30;
+  if (used >= cap)
+    return json(res, 429, { error: `Free model: ${cap} messages a day. Add your own API key for more.` }, CORS);
+
+  let body;
+  try { body = await readBody(req); }
+  catch { return json(res, 413, { error: 'request too large' }, CORS); }
+  if (!Array.isArray(body.messages) || !body.messages.length)
+    return json(res, 400, { error: 'no messages' }, CORS);
+
+  user.aiDay = day;
+  user.aiCount = used + 1;
+  auth.flush();
+
+  const upstream = await fetch(free.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${free.key}`,
+      ...(/openrouter/i.test(free.baseUrl) ? { 'HTTP-Referer': 'https://mini.app', 'X-Title': 'Mini' } : {}),
+    },
+    // The model is ours to choose; everything else is the caller's.
+    body: JSON.stringify({ ...body, model: free.model, stream: true }),
+  }).catch(e => ({ ok:false, status:502, text: async () => e.message }));
+
+  if (!upstream.ok) {
+    const detail = await upstream.text().catch(() => '');
+    return json(res, 502, { error: 'The free model is unavailable right now.',
+                            detail: String(detail).slice(0, 200) }, CORS);
+  }
+
+  res.writeHead(200, { ...CORS, 'Content-Type':'text/event-stream',
+                       'Cache-Control':'no-cache', 'X-Mini-Free-Left': String(cap - used - 1) });
+  const reader = upstream.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) await new Promise(r => res.once('drain', r));
+    }
+  } catch { /* the client hung up */ }
+  res.end();
 }
 
 /* ------------------------------------------------------------ handlers */
@@ -363,6 +452,8 @@ async function submit(req, res) {
     name: String(payload.name).trim().slice(0, LIMITS.name),
     emoji: String(payload.emoji || '📦').slice(0, 4),
     color: /^#[0-9a-f]{6}$/i.test(payload.color || '') ? payload.color : '#E8171F',
+    iconImage: typeof payload.iconImage === 'string' && payload.iconImage.startsWith('data:image/')
+      && payload.iconImage.length < 120_000 ? payload.iconImage : null,
     files: payload.files,
     assets: Array.isArray(payload.assets) ? payload.assets : [],
     deviceAccess: false,                     // market apps never get same-origin
@@ -380,6 +471,7 @@ async function submit(req, res) {
     name: bundle.name,
     emoji: bundle.emoji,
     color: bundle.color,
+    type: ['app', 'course', 'book'].includes(payload.type) ? payload.type : 'app',
     cat: slug(review.category || payload.cat),
     catName: String(review.categoryName || review.category || 'Boshqa').slice(0, 24),
     catIcon: String(review.categoryIcon || '📦').slice(0, 4),
@@ -398,6 +490,7 @@ async function submit(req, res) {
     ip,
   };
 
+  row.iconImage = bundle.iconImage;
   await fsp.writeFile(path.join(APPS, id + '.json'),
     JSON.stringify({ ...row, ...bundle, ip: undefined, authorId: undefined }));
   state.apps.unshift(row);
@@ -435,6 +528,23 @@ function admin(req, res, action, url) {
     return json(res, 200, auth.users.map(u => auth.publicUser(u)), CORS);
   if (action === 'sweep')
     return json(res, 200, { removed: auth.sweep() }, CORS);
+  if (action === 'config') {
+    if (req.method !== 'POST') return json(res, 200, { free: freePublic() }, CORS);
+    return readBody(req).then(body => {
+      if (body.clear) { free = null; fs.rmSync(freeFile, { force:true }); }
+      else {
+        free = {
+          baseUrl: String(body.baseUrl || 'https://openrouter.ai/api/v1'),
+          key: String(body.key || free?.key || ''),
+          model: String(body.model || ''),
+          label: String(body.label || 'Free model').slice(0, 40),
+          perDay: Math.max(1, Math.min(500, Number(body.perDay) || 30)),
+        };
+        writeJson(freeFile, free);
+      }
+      json(res, 200, { free: freePublic() }, CORS);
+    }).catch(() => json(res, 400, { error: 'bad request' }, CORS));
+  }
 
   const id = url.searchParams.get('id');
   const row = state.apps.find(a => a.id === id);
@@ -506,7 +616,8 @@ setTimeout(() => auth.sweep(), 10_000).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Mini on :${PORT} | data ${DATA} | ${auth.users.length} accounts` +
-    (MODERATE ? ' | moderation on' : '') + (ADMIN ? ' | admin on' : ''));
+    (MODERATE ? ' | moderation on' : '') + (ADMIN ? ' | admin on' : '') +
+    (freePublic() ? ` | free model ${free.model}` : ''));
 });
 
 /**

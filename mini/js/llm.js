@@ -7,6 +7,9 @@
  * point of this app is that it ships as static files with nothing to build.
  */
 
+import { marketBase } from './store.js';
+import { authHeaders } from './auth.js';
+
 const enc = new TextDecoder();
 
 function headers(s) {
@@ -31,9 +34,9 @@ async function fail(res) {
     const body = await res.text();
     try { detail = JSON.parse(body)?.error?.message || body; } catch { detail = body; }
   } catch {}
-  const hint = res.status === 401 ? 'API kalit noto\'g\'ri.'
-             : res.status === 402 ? 'Balans yetarli emas.'
-             : res.status === 429 ? 'Juda ko\'p so\'rov. Biroz kuting.'
+  const hint = res.status === 401 ? 'The API key was rejected.'
+             : res.status === 402 ? 'The account is out of credit.'
+             : res.status === 429 ? ''
              : '';
   throw new LLMError([hint, detail].filter(Boolean).join(' ').slice(0, 400) || `HTTP ${res.status}`, res.status);
 }
@@ -52,9 +55,20 @@ export async function* stream({ settings, messages, tools, signal, temperature }
   if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
   if (/openrouter/i.test(settings.baseUrl)) body.usage = { include: true };
 
-  const res = await fetch(settings.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
-    method: 'POST', headers: headers(settings), body: JSON.stringify(body), signal,
-  });
+  // On the free model the server holds the key and picks the model; the shape
+  // of the request and of the stream coming back is otherwise identical.
+  const viaServer = !!settings.useFree;
+  const res = viaServer
+    ? await fetch(marketBase() + '/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ messages, tools: body.tools, tool_choice: body.tool_choice,
+                               temperature: body.temperature }),
+        signal,
+      })
+    : await fetch(settings.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+        method: 'POST', headers: headers(settings), body: JSON.stringify(body), signal,
+      });
   if (!res.ok) await fail(res);
 
   const reader = res.body.getReader();

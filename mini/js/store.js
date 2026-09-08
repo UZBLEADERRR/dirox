@@ -48,6 +48,7 @@ const DEFAULTS = {
     maxSteps: 26,             // agent tool-loop budget
     installDismissed: false,
     marketUrl: '',            // '' = same origin as this page
+    useFree: false,           // use the model the server pays for
   },
   roles: [],                  // user-made roles only; builtins are merged in
   chats: [],
@@ -130,14 +131,14 @@ export function touch(chat) { chat.updatedAt = Date.now(); save(); }
 
 /* ---------------- apps ---------------- */
 
-export function publishApp({ id, name, emoji, color, files, assets, deviceAccess, marketId }) {
+export function publishApp({ id, name, emoji, color, iconImage, files, assets, deviceAccess, marketId }) {
   let app = id ? state.apps.find(a => a.id === id) : null;
   if (!app) {
     app = { id: id || uid(), createdAt: Date.now() };
     state.apps.unshift(app);
   }
   Object.assign(app, {
-    name, emoji, color,
+    name, emoji, color, iconImage: iconImage || null,
     files: structuredClone(files),
     assets: structuredClone(assets || []),
     deviceAccess: !!deviceAccess,

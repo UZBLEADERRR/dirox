@@ -219,24 +219,38 @@ body > .topbar{position:fixed;left:0;right:0;top:0}
   font-size:13px;color:var(--muted);white-space:nowrap;font-weight:500}
 .cat.on{background:var(--accent);color:#fff;font-weight:600}
 
-.market-list{display:flex;flex-direction:column;gap:2px;padding:0 8px 20px;max-width:760px;margin:0 auto}
-.mk-row{display:flex;align-items:center;gap:13px;padding:11px 8px;border-radius:var(--r);
-  width:100%;text-align:left;transition:background .12s}
-.mk-row:active{background:var(--surface-2)}
-.mk-ico{width:54px;height:54px;border-radius:15px;display:grid;place-items:center;font-size:27px;
-  flex:none;box-shadow:var(--shadow-sm)}
-.mk-body{flex:1;min-width:0}
-.mk-body b{display:block;font-size:15px;font-weight:600;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.mk-body small{display:block;color:var(--muted);font-size:12.5px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
-.mk-body .meta{display:flex;gap:8px;align-items:center;margin-top:3px;font-size:11.5px;color:var(--faint)}
-.mk-get{flex:none;height:32px;padding:0 16px;border-radius:999px;background:var(--surface-2);
-  color:var(--accent);font-weight:700;font-size:13px;letter-spacing:.01em}
-.mk-get.done{color:var(--muted);font-weight:600}
+.mk-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:0 14px 8px;
+  max-width:760px;margin:0 auto}
+@media (min-width:560px){.mk-grid{grid-template-columns:repeat(3,1fr)}}
+.mk-card{display:flex;flex-direction:column;gap:4px;padding:13px;border-radius:var(--r-lg);
+  background:var(--surface);border:1px solid var(--line);text-align:left;
+  transition:transform .12s,border-color .12s}
+.mk-card:active{transform:scale(.98);border-color:var(--accent)}
+.mk-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px}
+.mk-ico{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;font-size:28px;
+  flex:none;box-shadow:var(--shadow-sm);overflow:hidden}
+.mk-ico.big{width:80px;height:80px;border-radius:23px;font-size:40px;margin:0 auto}
+.mk-card b{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mk-card small{color:var(--muted);font-size:12px;line-height:1.4;min-height:2.8em;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.mk-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+.mk-installs{display:flex;align-items:center;gap:4px;color:var(--faint);font-size:11.5px}
+.mk-installs svg{width:13px;height:13px}
+.mk-get{flex:none;height:30px;padding:0 14px;border-radius:999px;background:var(--accent-soft);
+  color:var(--accent);font-weight:700;font-size:12.5px;letter-spacing:.02em}
+.mk-get.done{background:var(--surface-2);color:var(--muted);font-weight:600}
 .mk-section{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;
-  letter-spacing:.05em;padding:16px 10px 8px}
+  letter-spacing:.05em;padding:14px 18px 8px;max-width:760px;margin:0 auto}
 .market-empty{text-align:center;color:var(--muted);padding:12vh 30px;font-size:14.5px;white-space:pre-line}
+
+/* a real, running copy inside the detail sheet */
+.mk-preview{position:relative;height:340px;border-radius:var(--r);overflow:hidden;
+  border:1px solid var(--line);background:#fff;margin-bottom:6px}
+.mk-preview-load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);
+  font-size:13px;background:var(--surface-2)}
+.mk-stage{position:absolute;inset:0}
+.mk-stage iframe{width:390px;height:567px;border:0;transform-origin:top left;
+  transform:scale(var(--pv-scale,.86))}
 
 .mk-hero{padding:14px;max-width:760px;margin:0 auto}
 .mk-banner{border-radius:var(--r-lg);padding:20px;background:
@@ -460,3 +474,7 @@ body > .topbar{position:fixed;left:0;right:0;top:0}
 .chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .model-search{position:sticky;top:0;background:var(--surface);padding:2px 0 6px;z-index:2}
 .model-search .search{margin-bottom:10px;background:var(--surface-2)}
+
+.sheet-hero{padding:4px 0 14px}
+.sheet-hero .app-ico{margin:0 auto}
+.app-ico img,.mk-ico img,.artifact-ico img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
