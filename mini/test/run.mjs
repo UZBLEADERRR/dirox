@@ -16,7 +16,9 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const WEB_PORT = 8899, API_PORT = 8900;
+// Random ports: a crashed previous run must never make the next one fail.
+const WEB_PORT = 8800 + Math.floor(Math.random() * 400);
+const API_PORT = WEB_PORT + 400;
 const ORIGIN = `http://127.0.0.1:${WEB_PORT}`;
 const BASE = ORIGIN + '/index.html';
 const API  = `http://127.0.0.1:${API_PORT}/v1`;
@@ -32,7 +34,7 @@ const ok = (name, cond, detail = '') => {
 const group = name => console.log(`\n${name}`);
 
 const seed = (extra = {}) => ({
-  settings: { lang:'uz', apiKey:'sk-mock', baseUrl:API, model:'mock/fast',
+  settings: { apiKey:'sk-mock', baseUrl:API, model:'mock/fast',
               modelName:'Mock Fast', installDismissed:true, theme:'dark' },
   ...extra,
 });
@@ -44,14 +46,14 @@ async function makeAccount(name, username, password = 'olmaqogoz7') {
     body: JSON.stringify({ name, username, password }),
   });
   const body = await res.json();
-  if (body.error) throw new Error('akkaunt yaratilmadi: ' + body.error);
+  if (body.error) throw new Error('could not create an account: ' + body.error);
   return body;
 }
 
 const marketApi = (p, opts) => fetch(ORIGIN + p, opts).then(r => r.json());
 
 /** Builds the scripted calculator through the UI and waits for the artifact. */
-async function buildApp(page, prompt = 'Menga kalkulyator yasab ber') {
+async function buildApp(page, prompt = 'build me a calculator') {
   await page.fill('#input', prompt);
   await page.click('#btn-send');
   await page.waitForSelector('.artifact', { timeout: 45000 });
@@ -84,7 +86,7 @@ let accountSeq = 0;
 const newPage = async (state, account = 'auto') => {
   const ctx = await browser.newContext({ ...devices['iPhone 13'] });
   const acct = account === 'auto'
-    ? await makeAccount('Tester', 'tester' + (accountSeq++))
+    ? await makeAccount('Tester', 'tester' + (accountSeq++) + Math.random().toString(36).slice(2, 6))
     : account;
   await ctx.addInitScript(
     `try { localStorage.setItem('mini.v1', ${JSON.stringify(JSON.stringify(state))});` +
@@ -101,42 +103,42 @@ const newPage = async (state, account = 'auto') => {
 
 /* ----------------------------------------------------- 1. the agent loop */
 
-group('Agent: so\'rovdan ekrandagi ilovagacha');
+group('Agent: from a sentence to an app on the screen');
 {
   const { page, ctx, errs } = await newPage(seed());
-  await page.fill('#input', 'Menga kalkulyator yasab ber');
+  await page.fill('#input', 'build me a calculator');
   await page.click('#btn-send');
   await page.waitForSelector('.artifact', { timeout: 45000 });
   await page.waitForTimeout(600);
 
   const steps = await page.locator('.msg.ai .step b').allTextContents();
-  ok('fayl yozildi, tekshirildi, saqlandi', steps.length === 3, steps.join(' | '));
-  ok('run_check bajarildi', steps.some(s => s.startsWith('Tekshirildi')));
+  ok('wrote, checked, published', steps.length === 3, steps.join(' | '));
+  ok('run_check ran', steps.some(s => s.startsWith('Checked')));
 
   const st = await page.evaluate(() => JSON.parse(localStorage['mini.v1']));
-  ok('ilova saqlandi', st.apps.length === 1 && st.apps[0].name === 'Kalkulyator');
-  ok('token hisobi yozildi', st.totals.in > 0 && st.totals.out > 0);
-  ok('chat nomi qo\'yildi', !!st.chats[0].title);
+  ok('the app was saved', st.apps.length === 1 && st.apps[0].name === 'Calculator');
+  ok('token usage recorded', st.totals.in > 0 && st.totals.out > 0);
+  ok('the chat got a title', !!st.chats[0].title);
 
   await page.click('#btn-apps'); await page.waitForTimeout(300);
   await page.click('.app-tile'); await page.waitForTimeout(800);
   const f = page.frameLocator('#player-stage iframe');
   for (const k of ['7', '+', '5', '=']) await f.locator('button', { hasText: k }).click();
   await page.waitForTimeout(300);
-  ok('yasalgan ilova hisoblaydi (7+5)', (await f.locator('#out').textContent()) === '12');
+  ok('the built app computes 7+5', (await f.locator('#out').textContent()) === '12');
 
   await page.waitForTimeout(400);
   const kept = await page.evaluate(() => Object.keys(localStorage)
     .filter(k => k.startsWith('mini.appdata.') && !k.endsWith('__check__'))
     .map(k => localStorage.getItem(k)));
-  ok('ilova localStorage ko\'prigi saqlaydi', kept.some(v => v.includes('"12"')), kept.join());
-  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  ok('the storage bridge persists', kept.some(v => v.includes('"12"')), kept.join());
+  ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
 /* -------------------------------------------------------- 2. the sandbox */
 
-group('Sandbox: izolyatsiya, o\'z-o\'zini test, surat');
+group('Sandbox: isolation, self-test, screenshot');
 {
   const { page, ctx, errs } = await newPage(seed());
   const r = await page.evaluate(async () => {
@@ -144,7 +146,7 @@ group('Sandbox: izolyatsiya, o\'z-o\'zini test, surat');
     const project = {
       files: {
         'index.html': `<!doctype html><html><head><link rel="stylesheet" href="style.css"></head>
-<body><h1>Salom</h1><p>localStorage haqida matn.</p><button onclick="bump()">Bos</button>
+<body><h1>Salom</h1><p>Some text about localStorage.</p><button onclick="bump()">Bos</button>
 <div id="o"></div><script src="app.js"><\/script></body></html>`,
         'style.css': 'h1{color:#345}',
         'app.js': `function bump(){ var n=(+localStorage.getItem('n')||0)+1;
@@ -162,35 +164,35 @@ group('Sandbox: izolyatsiya, o\'z-o\'zini test, surat');
     };
   });
 
-  ok('CSS ichkariga joylandi', r.composed.includes('h1{color:#345}'));
-  ok('JS ichkariga joylandi', r.composed.includes('function bump'));
-  ok('storage identifikatori almashtirildi', r.composed.includes('__miniLS.getItem'));
-  ok('sahifadagi matnga tegilmadi', r.composed.includes('localStorage haqida matn'));
-  ok('tugmalar bosib ko\'rildi', r.clicked >= 1, String(r.clicked));
-  ok('sog\'lom ilovada xato yo\'q', r.report.includes('Xato yo\'q'), r.report);
-  ok('siniq ilovada xato topildi', /XATOLAR/.test(r.brokenReport), r.brokenReport);
-  ok('ekran surati olindi', r.shot > 1000, String(r.shot));
+  ok('CSS was inlined', r.composed.includes('h1{color:#345}'));
+  ok('JS was inlined', r.composed.includes('function bump'));
+  ok('storage identifier rewritten', r.composed.includes('__miniLS.getItem'));
+  ok('prose left alone', r.composed.includes('text about localStorage'));
+  ok('controls were clicked', r.clicked >= 1, String(r.clicked));
+  ok('a healthy app reports no errors', r.report.includes('No errors'), r.report);
+  ok('a broken app is caught', /ERRORS/.test(r.brokenReport), r.brokenReport);
+  ok('screenshot taken', r.shot > 1000, String(r.shot));
   // The broken project above throws on purpose; nothing else should.
-  ok('faqat ataylab siniq ilova xato berdi',
+  ok('only the deliberately broken app threw',
      errs.every(e => /notDefined/.test(e)), errs.join(' | '));
   await ctx.close();
 }
 
 /* ---------------------------------------------------------- 3. vision */
 
-group('Ko\'rish: surat modelga qaytadi');
+group('Vision: the screenshot goes back to the model');
 {
   const { page, ctx, errs } = await newPage(seed());
-  await page.fill('#input', 'Kalkulyator yasab, suratini olib tekshir');
+  await page.fill('#input', 'build a calculator and take a screenshot of it');
   await page.click('#btn-send');
   await page.waitForSelector('.artifact', { timeout: 45000 });
   await page.waitForTimeout(500);
 
   const steps = await page.locator('.msg.ai .step b').allTextContents();
-  ok('screenshot qadami bor', steps.some(s => s.includes('surat')), steps.join(' | '));
+  ok('the screenshot step ran', steps.some(s => s.includes('Screenshot')), steps.join(' | '));
 
   const last = JSON.parse(fs.readFileSync(new URL('./last-request.json', import.meta.url), 'utf8'));
-  ok('rasm modelga image_url sifatida yuborildi',
+  ok('the image went back as image_url',
      last.imgs.some(u => u.startsWith('data:image/jpeg')), JSON.stringify(last.imgs));
   ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
   await ctx.close();
@@ -198,7 +200,7 @@ group('Ko\'rish: surat modelga qaytadi');
 
 /* ----------------------------------------- 4. installable per-app manifest */
 
-group('Ekranga qo\'shish: har bir ilovaga alohida manifest');
+group('Home screen: a manifest per app');
 {
   const { page, ctx, errs } = await newPage(seed());
   await page.evaluate(() => navigator.serviceWorker.ready);
@@ -208,7 +210,7 @@ group('Ekranga qo\'shish: har bir ilovaga alohida manifest');
 
   const r = await page.evaluate(async () => {
     const { applyAppIdentity, restoreIdentity } = await import('./js/icons.js');
-    await applyAppIdentity({ id:'demo', name:'Kalkulyator', emoji:'🧮', color:'#22c55e' });
+    await applyAppIdentity({ id:'demo', name:'Calculator', emoji:'🧮', color:'#22c55e' });
     const href = document.querySelector('#manifest-link').getAttribute('href');
     const res = await fetch(href);
     const body = await res.json();
@@ -220,20 +222,20 @@ group('Ekranga qo\'shish: har bir ilovaga alohida manifest');
              restored: document.title };
   });
 
-  ok('manifest service worker orqali berildi', r.ok && /manifest/.test(r.type), r.type);
-  ok('start_url ilovaga ishora qiladi', r.body.start_url.includes('?app=demo'), r.body.start_url);
-  ok('standalone rejim', r.body.display === 'standalone');
-  ok('PNG belgi berildi', r.iconOk && r.iconBytes > 500, String(r.iconBytes));
-  ok('iOS uchun sarlavha va belgi almashtirildi',
-     r.live.title === 'Kalkulyator' && r.live.apple.startsWith('data:image/png'));
-  ok('chiqqanda o\'z nomi qaytdi', r.restored === 'Mini');
+  ok('served by the service worker', r.ok && /manifest/.test(r.type), r.type);
+  ok('start_url points at the app', r.body.start_url.includes('?app=demo'), r.body.start_url);
+  ok('standalone display', r.body.display === 'standalone');
+  ok('a real PNG icon', r.iconOk && r.iconBytes > 500, String(r.iconBytes));
+  ok('iOS title and icon swapped in',
+     r.live.title === 'Calculator' && r.live.apple.startsWith('data:image/png'));
+  ok('the shell takes its name back', r.restored === 'Mini');
   ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
 /* ------------------------------------------------------- 5. back button */
 
-group('Orqaga tugmasi: har qatlam o\'z navbatida yopiladi');
+group('Back button: one layer at a time');
 {
   const app = { id:'a1', name:'Test', emoji:'🧮', color:'#22c55e',
     files:{ 'index.html':'<!doctype html><html><body><h1>Salom</h1></body></html>' },
@@ -248,35 +250,35 @@ group('Orqaga tugmasi: har qatlam o\'z navbatida yopiladi');
 
   await page.click('#btn-menu'); await page.waitForTimeout(250);
   await back();
-  ok('drawer yopildi', !(await vis()).drawer);
+  ok('the drawer closed', !(await vis()).drawer);
 
   await page.click('#btn-apps'); await page.waitForTimeout(250);
   await page.click('.app-tile'); await page.waitForTimeout(600);
   await back();
   let v = await vis();
-  ok('ilova yopildi, ro\'yxat qoldi', !v.player && v.apps);
+  ok('the app closed, the grid stayed', !v.player && v.apps);
   await back();
-  ok('ro\'yxat yopildi', !(await vis()).apps);
+  ok('the grid closed', !(await vis()).apps);
 
   await page.click('#btn-menu'); await page.waitForTimeout(200);
   await page.click('#btn-settings'); await page.waitForTimeout(300);
   await back();
   v = await vis();
-  ok('sheet yopildi, drawer qoldi', !v.sheet && v.drawer);
+  ok('the sheet closed, the drawer stayed', !v.sheet && v.drawer);
   await back();
   v = await vis();
-  ok('drawer yopildi, ilovadan chiqib ketilmadi', !v.drawer && v.alive);
+  ok('the drawer closed without leaving the app', !v.drawer && v.alive);
   ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
 /* ------------------------------------------------------------ 6. accounts */
 
-group('Akkaunt: ro\'yxatdan o\'tish, kirish, chiqish');
+group('Accounts: sign up, sign in, sign out');
 {
   const { page, ctx, errs } = await newPage(seed(), null);   // no session
-  ok('kirish ekrani ko\'rsatildi', await page.isVisible('#auth-screen'));
-  ok('ilova yopiq', !(await page.isVisible('#composer')));
+  ok('the sign-in screen is shown', await page.isVisible('#auth-screen'));
+  ok('the app is closed', !(await page.isVisible('#composer')));
 
   await page.click('#auth-tab-register');
   await page.fill('#auth-name', 'Sarvarbek');
@@ -284,52 +286,52 @@ group('Akkaunt: ro\'yxatdan o\'tish, kirish, chiqish');
   await page.fill('#auth-password', 'olmaqogoz7');
   await page.click('#auth-submit');
   await page.waitForSelector('#composer', { state:'visible', timeout: 15000 });
-  ok('ro\'yxatdan o\'tib ichkariga kirdi', await page.isVisible('#composer'));
-  ok('kirish ekrani yopildi', !(await page.isVisible('#auth-screen')));
+  ok('signing up gets you in', await page.isVisible('#composer'));
+  ok('the sign-in screen closed', !(await page.isVisible('#auth-screen')));
 
   await page.click('#btn-menu'); await page.waitForTimeout(300);
-  ok('drawerda akkaunt ko\'rinadi', (await page.textContent('#account-name')) === 'Sarvarbek');
-  ok('username ko\'rinadi', (await page.textContent('#account-handle')) === '@sarvarbek');
+  ok('the drawer shows the account', (await page.textContent('#account-name')) === 'Sarvarbek');
+  ok('the handle is shown', (await page.textContent('#account-handle')) === '@sarvarbek');
 
   await page.click('#btn-account'); await page.waitForTimeout(350);
   const acctSheet = await page.textContent('#sheet-body');
-  ok('akkaunt oynasida chegara ko\'rinadi', acctSheet.includes('kun qoldi'), acctSheet.slice(0, 80));
-  ok('faolsizlik qoidasi yozilgan', acctSheet.includes('30 kun'));
+  ok('the account sheet shows the countdown', acctSheet.includes('days left'), acctSheet.slice(0, 80));
+  ok('the inactivity rule is stated', acctSheet.includes('30 days'));
 
   // a reload keeps the session
   await page.reload({ waitUntil:'networkidle' });
   await page.waitForTimeout(700);
-  ok('sessiya saqlandi', await page.isVisible('#composer'));
-  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  ok('the session survived a reload', await page.isVisible('#composer'));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
-group('Akkaunt: noto\'g\'ri parol va o\'rnatilgan ilova');
+group('Accounts: wrong password, and an installed app');
 {
   const { page, ctx } = await newPage(seed(), null);
   await page.fill('#auth-username', 'sarvarbek');
-  await page.fill('#auth-password', 'notogri');
+  await page.fill('#auth-password', 'wrongone');
   await page.click('#auth-submit');
   await page.waitForSelector('#auth-error', { state:'visible', timeout: 15000 });
-  ok('noto\'g\'ri parol rad etildi', (await page.textContent('#auth-error')).includes('noto'));
-  ok('ichkariga kirmadi', !(await page.isVisible('#composer')));
+  ok('a wrong password is refused', (await page.textContent('#auth-error')).includes('Wrong'));
+  ok('it did not let us in', !(await page.isVisible('#composer')));
   await ctx.close();
 
   // A mini app already on the home screen must open without an account.
-  const app = { id:'local1', name:'Mahalliy', emoji:'🧮', color:'#E8171F',
-    files:{ 'index.html':'<!doctype html><html><body><h1 id="h">Salom</h1></body></html>' },
+  const app = { id:'local1', name:'Local', emoji:'🧮', color:'#E8171F',
+    files:{ 'index.html':'<!doctype html><html><body><h1 id="h">Hello</h1></body></html>' },
     assets:[], createdAt:1, updatedAt:1 };
   const { page: p2, ctx: c2 } = await newPage(seed({ apps:[app] }), null);
   await p2.goto(`${ORIGIN}/?app=local1`, { waitUntil:'networkidle' });
   await p2.waitForTimeout(900);
-  ok('o\'rnatilgan ilova akkauntsiz ochiladi', await p2.isVisible('#player'));
-  ok('kirish so\'ralmadi', !(await p2.isVisible('#auth-screen')));
+  ok('an installed app opens with no account', await p2.isVisible('#player'));
+  ok('no sign-in was demanded', !(await p2.isVisible('#auth-screen')));
   await c2.close();
 }
 
 /* ------------------------------------------------------------- 7. market */
 
-group('Market: tekshiruv, joylash, kunlik chegara');
+group('Market: review, publish, daily limit');
 let publishedId = null;
 {
   const { page, ctx, errs } = await newPage(seed());
@@ -337,65 +339,65 @@ let publishedId = null;
 
   await page.click('.artifact .btn.dark');                 // "Marketga joylash"
   await page.waitForTimeout(300);
-  ok('joylash oynasi ochildi', (await page.textContent('#sheet-body h3')).includes('Marketga'));
+  ok('the publish sheet opened', (await page.textContent('#sheet-body h3')).includes('Publish'));
 
   await page.click('#sheet-body .btn.primary');            // start the AI review
   await page.waitForSelector('.verdict', { timeout: 30000 });
-  ok('AI tekshiruvi o\'tdi', await page.isVisible('.verdict.ok'));
-  ok('kategoriya aniqlandi', (await page.textContent('.verdict')).includes('Asboblar'));
+  ok('the AI review passed', await page.isVisible('.verdict.ok'));
+  ok('a category was assigned', (await page.textContent('.verdict')).includes('Tools'));
 
   await page.click('#sheet-body .btn.primary');            // submit
   await page.waitForSelector('.note.ok', { timeout: 20000 });
-  ok('serverga joylandi', (await page.textContent('.note.ok')).includes('marketda'));
+  ok('it reached the server', (await page.textContent('.note.ok')).includes('market'));
 
   const cat = await marketApi('/api/market/index.json');
   publishedId = cat.apps[0]?.id;
-  ok('katalogda paydo bo\'ldi', cat.apps.length === 1 && cat.apps[0].name === 'Kalkulyator',
+  ok('it appears in the catalogue', cat.apps.length === 1 && cat.apps[0].name === 'Calculator',
      JSON.stringify(cat.apps.map(a => a.name)));
-  ok('kategoriya yaratildi', cat.categories[0]?.id === 'asboblar', JSON.stringify(cat.categories));
-  ok('muallif saqlandi', cat.apps[0]?.author === 'Tester');
+  ok('the category was created', cat.categories[0]?.id === 'tools', JSON.stringify(cat.categories));
+  ok('the author was recorded', cat.apps[0]?.author === 'Tester');
 
   // second publish, same device, same day
   await page.click('#sheet-body .btn.primary');            // closes the sheet
   await page.waitForTimeout(300);
   await page.click('.artifact .btn.dark');
   await page.waitForTimeout(400);
-  ok('kunlik chegara ushlandi', (await page.textContent('#sheet-body')).includes('Kuniga bitta'));
-  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  ok('the daily limit holds', (await page.textContent('#sheet-body')).includes('One app a day'));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
-group('Market: boshqa foydalanuvchi o\'rnatadi');
+group('Market: someone else installs it');
 {
   const { page, ctx, errs } = await newPage(seed());
   await page.click('#tab-market');
   await page.waitForSelector('.mk-row', { timeout: 20000 });
-  ok('ro\'yxatda ko\'rinadi', (await page.textContent('.mk-row b')) === 'Kalkulyator');
+  ok('it is listed', (await page.textContent('.mk-row b')) === 'Calculator');
 
   await page.click('.mk-row .mk-get');                     // OLISH
   await page.waitForTimeout(1500);
   const apps = await page.evaluate(() => JSON.parse(localStorage['mini.v1']).apps);
-  ok('ilova o\'rnatildi', apps.length === 1 && apps[0].marketId === publishedId,
+  ok('the app was installed', apps.length === 1 && apps[0].marketId === publishedId,
      JSON.stringify(apps.map(a => a.marketId)));
-  ok('fayllar yuklandi', !!apps[0]?.files?.['index.html']);
-  ok('ekranga qo\'shish taklif qilindi', await page.isVisible('#sheet-wrap'));
+  ok('its files came with it', !!apps[0]?.files?.['index.html']);
+  ok('add-to-home was offered', await page.isVisible('#sheet-wrap'));
 
   await page.waitForTimeout(3400);            // counts are coalesced server-side
   const cat = await marketApi('/api/market/index.json');
-  ok('o\'rnatish soni ortdi', cat.apps[0].installs >= 1, String(cat.apps[0].installs));
-  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  ok('the install count went up', cat.apps[0].installs >= 1, String(cat.apps[0].installs));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
-group('Market: ulashilgan havola va server tekshiruvi');
+group('Market: shared links and server validation');
 {
   const { page, ctx, errs } = await newPage(seed());
   await page.goto(`${ORIGIN}/?m=${publishedId}`, { waitUntil:'networkidle' });
   await page.waitForSelector('#sheet-body .stat-row', { timeout: 20000 });
-  ok('havola ilova sahifasini ochdi', (await page.textContent('#sheet-body h3')) === 'Kalkulyator');
-  ok('market ko\'rinishiga o\'tdi', await page.isVisible('#view-market'));
-  ok('manzil tozalandi', !page.url().includes('?m='));
-  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  ok('the link opened the app page', (await page.textContent('#sheet-body h3')) === 'Calculator');
+  ok('it switched to the market', await page.isVisible('#view-market'));
+  ok('the address was cleaned up', !page.url().includes('?m='));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 
   const post = (body, token) => fetch(ORIGIN + '/api/market/submit', {
@@ -404,61 +406,61 @@ group('Market: ulashilgan havola va server tekshiruvi');
 
   const anon = await fetch(ORIGIN + '/api/market/submit', { method:'POST',
     headers:{ 'Content-Type':'application/json' }, body:'{}' });
-  ok('akkauntsiz joylab bo\'lmaydi', anon.status === 401, String(anon.status));
+  ok('publishing without an account is refused', anon.status === 401, String(anon.status));
 
   const good = { name:'Tashqi', emoji:'🧪', color:'#E8171F', review:{ ok:true, category:'test' },
     files:{ 'index.html':'<!doctype html><html><body>' + 'x'.repeat(300) +
       '<script src="https://cdn.example.com/a.js"><\/script></body></html>' } };
   const r1 = await post(good, (await makeAccount('Val A', 'valid_a')).token);
-  ok('tashqi skriptli ilova rad etildi', r1.status === 400 && /mustaqil/.test(r1.body.error), JSON.stringify(r1));
+  ok('an external script is refused', r1.status === 400 && /self-contained/.test(r1.body.error), JSON.stringify(r1));
 
   const r2 = await post({ ...good, files:{ 'index.html':'<html><body>hi</body></html>' } },
     (await makeAccount('Val B', 'valid_b')).token);
-  ok('bo\'sh ilova rad etildi', r2.status === 400, JSON.stringify(r2));
+  ok('an empty app is refused', r2.status === 400, JSON.stringify(r2));
 
   const r3 = await post({ ...good, review:{ ok:false },
     files:{ 'index.html':'<!doctype html><html><body>' + 'y'.repeat(300) + '</body></html>' } },
     (await makeAccount('Val C', 'valid_c')).token);
-  ok('tekshiruvsiz ilova rad etildi', r3.status === 400 && /tekshiruv/.test(r3.body.error), JSON.stringify(r3));
+  ok('an unreviewed app is refused', r3.status === 400 && /review/.test(r3.body.error), JSON.stringify(r3));
 }
 
 /* --------------------------------------------- 9. the inactivity rule */
 
-group('Faolsiz akkauntlar o\'chiriladi');
+group('The inactivity rule');
 {
   const { Auth } = await import(path.join(ROOT, 'server/auth.js'));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-auth-'));
   const a = new Auth(dir, { inactiveDays: 30 });
 
-  a.register({ name:'Faol', username:'faol', password:'olmaqogoz7' });
-  a.register({ name:'Eski', username:'eski', password:'olmaqogoz7' });
-  const stale = a.users.find(u => u.username === 'eski');
+  a.register({ name:'Active', username:'active', password:'olmaqogoz7' });
+  a.register({ name:'Idle', username:'idle', password:'olmaqogoz7' });
+  const stale = a.users.find(u => u.username === 'idle');
   stale.lastSeen = Date.now() - 31 * 86_400_000;
 
-  ok('30 kunlik jimlikdan keyin 0 kun qoladi', a.daysLeft(stale) === 0, String(a.daysLeft(stale)));
+  ok('after 30 silent days nothing is left', a.daysLeft(stale) === 0, String(a.daysLeft(stale)));
   const removed = a.sweep();
-  ok('faolsiz akkaunt o\'chdi', removed.length === 1 && a.users.length === 1, JSON.stringify(removed));
-  ok('faol akkaunt qoldi', a.users[0].username === 'faol');
-  ok('o\'chgan username qayta band emas', !a.byName.has('eski'));
+  ok('the idle account was removed', removed.length === 1 && a.users.length === 1, JSON.stringify(removed));
+  ok('the active one stayed', a.users[0].username === 'active');
+  ok('the freed username is available again', !a.byName.has('idle'));
 
   // the file on disk agrees with memory
   const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'users.json'), 'utf8'));
-  ok('diskda ham o\'chdi', onDisk.length === 1 && onDisk[0].username === 'faol');
+  ok('the file on disk agrees', onDisk.length === 1 && onDisk[0].username === 'active');
 
   // tokens survive a restart, forged ones never work
   const token = a.issue(a.users[0]);
   const b = new Auth(dir, { inactiveDays: 30 });
-  ok('token qayta ishga tushirishdan keyin ham ishlaydi', b.verify(token)?.username === 'faol');
-  ok('soxta token ishlamaydi', b.verify(token.slice(0, -1) + 'x') === null);
-  ok('parol tekshiruvi ishlaydi',
-     !!b.login({ username:'faol', password:'olmaqogoz7', ip:'1.1.1.1' }).user &&
-     !!b.login({ username:'faol', password:'boshqa', ip:'2.2.2.2' }).error);
+  ok('a token survives a restart', b.verify(token)?.username === 'active');
+  ok('a forged token does not', b.verify(token.slice(0, -1) + 'x') === null);
+  ok('passwords are checked',
+     !!b.login({ username:'active', password:'olmaqogoz7', ip:'1.1.1.1' }).user &&
+     !!b.login({ username:'active', password:'wrongone', ip:'2.2.2.2' }).error);
 
   // changing the password must not leave the old session usable
   const old = b.issue(b.users[0]);
-  b.changePassword(b.users[0], { current:'olmaqogoz7', next:'yangiparol9' });
-  ok('parol o\'zgarsa eski sessiya o\'ladi', b.verify(old) === null);
-  ok('yangi parol ishlaydi', !!b.login({ username:'faol', password:'yangiparol9', ip:'3.3.3.3' }).user);
+  b.changePassword(b.users[0], { current:'olmaqogoz7', next:'newpass99' });
+  ok('changing the password kills old sessions', b.verify(old) === null);
+  ok('the new password works', !!b.login({ username:'active', password:'newpass99', ip:'3.3.3.3' }).user);
 
   // sign-ups are capped per address, and the cap is per address
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-auth2-'));
@@ -466,46 +468,214 @@ group('Faolsiz akkauntlar o\'chiriladi');
   const { Auth: Auth2 } = await import(path.join(ROOT, 'server/auth.js') + '?cap');
   const c = new Auth2(dir2, {});
   const tries = [1, 2, 3, 4].map(i =>
-    c.register({ name:'Yangi', username:'yangi' + i, password:'olmaqogoz7', ip:'9.9.9.9' }));
-  ok('soatiga cheklangan ro\'yxatdan o\'tish', !!tries[3].error && !tries[2].error,
+    c.register({ name:'New', username:'new' + i, password:'olmaqogoz7', ip:'9.9.9.9' }));
+  ok('sign-ups are capped per hour', !!tries[3].error && !tries[2].error,
      JSON.stringify(tries.map(t => t.error || 'ok')));
-  ok('boshqa manzil bloklanmaydi',
-     !c.register({ name:'Yangi', username:'boshqa1', password:'olmaqogoz7', ip:'8.8.8.8' }).error);
+  ok('another address is unaffected',
+     !c.register({ name:'New', username:'other1', password:'olmaqogoz7', ip:'8.8.8.8' }).error);
   fs.rmSync(dir2, { recursive:true, force:true });
   fs.rmSync(dir, { recursive:true, force:true });
 }
 
-/* ------------------------------------------------ 10. translation tables */
+/* ----------------------------------------------------------- 10. course */
 
-group('Tarjima jadvallari');
+group('Course: outline, lessons, player');
 {
-  const src = fs.readFileSync(path.join(ROOT, 'js/i18n.js'), 'utf8');
-  const blocks = [...src.matchAll(/^  (uz|en|ru): \{$([\s\S]*?)^  \},$/gm)];
-  ok('uchta til bor', blocks.length === 3, String(blocks.length));
+  const { page, ctx, errs } = await newPage(seed());
+  await page.click('#btn-role'); await page.waitForTimeout(300);
+  await page.click('#sheet-body .list-item >> nth=1');       // Course builder
+  await page.waitForTimeout(300);
+  ok('the course role is selected', (await page.textContent('#role-name')) === 'Course builder');
 
-  // Nested tables (steps:{…}) carry their own key names; flatten them out
-  // before looking for duplicates at the top level.
-  const keysOf = body => [...body.replace(/\w+:\s*\{[^{}]*\}/g, 'nested:0')
-    .matchAll(/(?:^|[,{]\s*)\n?\s*([a-zA-Z]\w*):/g)].map(m => m[1]);
-  const sets = blocks.map(([, lang, body]) => {
-    const keys = keysOf(body);
-    const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
-    // A repeated key silently wins in a JS object literal, and the loser is
-    // usually the new one — a whole string quietly reverting to something else.
-    ok(`${lang}: takrorlangan kalit yo'q`, dupes.length === 0, [...new Set(dupes)].join(', '));
-    return new Set(keys);
-  });
+  await page.fill('#input', 'I want an IELTS course');
+  await page.click('#btn-send');
+  await page.waitForSelector('.artifact', { timeout: 60000 });
+  await page.waitForTimeout(600);
 
-  const [uz, en, ru] = sets;
-  const missing = (a, b, an, bn) => [...a].filter(k => !b.has(k))
-    .map(k => `${bn} da yo'q: ${k}`);
-  const gaps = [...missing(uz, en, 'uz', 'en'), ...missing(uz, ru, 'uz', 'ru')];
-  ok('barcha kalitlar uchala tilda bor', gaps.length === 0, gaps.slice(0, 6).join(' | '));
+  const steps = await page.locator('.msg.ai .step b').allTextContents();
+  ok('an outline came first', steps[0]?.startsWith('Outline'), steps.join(' | '));
+  ok('three lessons were written', steps.filter(x => x.startsWith('Lesson')).length === 3, steps.join(' | '));
+  ok('the card counts lessons',
+     (await page.textContent('.artifact-meta span')).includes('3 lessons'),
+     await page.textContent('.artifact-meta span'));
+
+  const st = await page.evaluate(() => JSON.parse(localStorage['mini.v1']));
+  const files = Object.keys(st.chats[0].project.files);
+  ok('lesson files are kept separately', files.filter(f => f.startsWith('lessons/')).length === 3, files.join());
+  ok('the player was generated', files.includes('index.html'));
+
+  // open it and walk through a lesson
+  await page.click('.artifact-actions .btn');
+  await page.waitForTimeout(900);
+  const f = page.frameLocator('#player-stage iframe');
+  ok('the cover shows the title', (await f.locator('.hero h1').textContent()) === 'IELTS Band 7');
+  ok('progress starts at zero', (await f.locator('#hpc').textContent()).includes('0 of 3'));
+
+  await f.locator('#continue').click();
+  await page.waitForTimeout(400);
+  ok('a lesson opens', (await f.locator('#body h1').textContent()).includes('What the test looks like'));
+
+  await f.locator('#body .q li').nth(0).click();             // wrong answer
+  await page.waitForTimeout(200);
+  ok('a wrong answer is marked', await f.locator('#body .q li.wrong').isVisible());
+  ok('the right answer is revealed', await f.locator('#body .q li.right').isVisible());
+  ok('the explanation appears', await f.locator('#body .q .why').isVisible());
+
+  await f.locator('#body .fill input').fill('once');
+  await page.waitForTimeout(200);
+  ok('a filled blank is graded', await f.locator('#body .fill input.right').isVisible());
+
+  await f.locator('#next').click();
+  await page.waitForTimeout(400);
+  await f.locator('#back').click();
+  await page.waitForTimeout(400);
+  ok('progress was saved', (await f.locator('#hpc').textContent()).includes('1 of 3'),
+     await f.locator('#hpc').textContent());
+  ok('the lesson is ticked off', await f.locator('#home .tick.on').first().isVisible());
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+/* ------------------------------------------------------------- 11. book */
+
+group('Book: chapters, cover, reader');
+{
+  const { page, ctx, errs } = await newPage(seed());
+  await page.click('#btn-role'); await page.waitForTimeout(300);
+  await page.click('#sheet-body .list-item >> nth=2');       // Book writer
+  await page.waitForTimeout(300);
+
+  await page.fill('#input', 'write a book about coffee');
+  await page.click('#btn-send');
+  await page.waitForSelector('.artifact', { timeout: 60000 });
+  await page.waitForTimeout(600);
+
+  const steps = await page.locator('.msg.ai .step b').allTextContents();
+  ok('chapters were written', steps.filter(x => x.startsWith('Chapter')).length === 2, steps.join(' | '));
+  ok('a cover was set', steps.some(x => x.startsWith('Cover')), steps.join(' | '));
+
+  const st = await page.evaluate(() => JSON.parse(localStorage['mini.v1']));
+  ok('the cover is a file', !!st.chats[0].project.files['cover.svg']);
+
+  await page.click('.artifact-actions .btn');
+  await page.waitForTimeout(900);
+  const f = page.frameLocator('#player-stage iframe');
+  ok('the cover art renders', await f.locator('#home .cover-art svg').isVisible());
+  ok('the author is shown', (await f.locator('#home .cover .by').textContent()) === 'Mini');
+  ok('contents are listed', (await f.locator('#home .ch-link').count()) === 2);
+
+  await f.locator('#home .ch-link').first().click();
+  await page.waitForTimeout(400);
+  ok('a chapter opens', (await f.locator('#body h1').textContent()).includes('Where coffee comes from'));
+  ok('the chapter is numbered', (await f.locator('#body h1 span').textContent()) === 'Chapter 1');
+
+  const before = await f.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--fs'));
+  await f.locator('#bigger').click();
+  await page.waitForTimeout(200);
+  const after = await f.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--fs'));
+  ok('the type size control works', before !== after, `${before} -> ${after}`);
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+/* -------------------------------------------------- 12. reading documents */
+
+group('Documents: PDF, EPUB and plain text');
+{
+  const zlib = await import('node:zlib');
+
+  // A small but genuine PDF: a Flate-compressed content stream with one string.
+  const content = Buffer.from('BT /F1 12 Tf 72 720 Td (The quick brown fox jumps over the lazy dog.) Tj ET\n' +
+                              'BT /F1 12 Tf 72 700 Td (Second line of the document.) Tj ET');
+  const zipped = zlib.deflateSync(content);
+  const pdf = Buffer.concat([
+    Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n' +
+                '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+                '3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n' +
+                `4 0 obj<</Length ${zipped.length}/Filter/FlateDecode>>stream\n`),
+    zipped,
+    Buffer.from('\nendstream\nendobj\ntrailer<</Root 1 0 R>>\n%%EOF'),
+  ]);
+
+  // A small but genuine EPUB: a real zip with a manifest and one chapter.
+  const crc = (buf) => {
+    if (zlib.crc32) return zlib.crc32(buf) >>> 0;
+    let c = ~0;
+    for (const b of buf) { c ^= b; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); }
+    return ~c >>> 0;
+  };
+  const entries = [
+    ['mimetype', Buffer.from('application/epub+zip'), 0],
+    ['content.opf', Buffer.from('<package><manifest><item id="c1" href="ch1.xhtml"/></manifest>' +
+      '<spine><itemref idref="c1"/></spine></package>'), 8],
+    ['ch1.xhtml', Buffer.from('<html><body><h1>Chapter One</h1>' +
+      '<p>The bean travelled a long way before anyone thought to roast it. ' +
+      'It crossed a sea, changed hands four times, and arrived with a name nobody could pronounce.</p>' +
+      '</body></html>'), 8],
+  ];
+  const locals = [], central = [];
+  let off = 0;
+  for (const [name, body, method] of entries) {
+    const data = method === 8 ? zlib.deflateRawSync(body) : body;
+    const nb = Buffer.from(name);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(method, 8);
+    lh.writeUInt32LE(crc(body), 14); lh.writeUInt32LE(data.length, 18);
+    lh.writeUInt32LE(body.length, 22); lh.writeUInt16LE(nb.length, 26);
+    locals.push(lh, nb, data);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(method, 10); ch.writeUInt32LE(crc(body), 16);
+    ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(body.length, 24);
+    ch.writeUInt16LE(nb.length, 28); ch.writeUInt32LE(off, 42);
+    central.push(ch, nb);
+    off += 30 + nb.length + data.length;
+  }
+  const localBuf = Buffer.concat(locals), centralBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralBuf.length, 12); eocd.writeUInt32LE(localBuf.length, 16);
+  const epub = Buffer.concat([localBuf, centralBuf, eocd]);
+
+  const { page, ctx, errs } = await newPage(seed());
+  const out = await page.evaluate(async ({ pdfB64, epubB64 }) => {
+    const { extractText, ExtractError } = await import('./extract.js'.replace('./', './js/'));
+    const asFile = (b64, name, type) => {
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new File([arr], name, { type });
+    };
+    const res = {};
+    res.txt = await extractText(new File([new Blob(['Plain text, straight through. '.repeat(4)])],
+      'notes.txt', { type:'text/plain' }));
+    res.html = await extractText(new File([new Blob(
+      ['<html><body><h1>Title</h1><p>Body text that survives the tags.</p></body></html>'.repeat(2)])],
+      'page.html', { type:'text/html' }));
+    res.pdf = await extractText(asFile(pdfB64, 'book.pdf', 'application/pdf'));
+    res.epub = await extractText(asFile(epubB64, 'book.epub', 'application/epub+zip'));
+    try { await extractText(new File([new Blob(['x'])], 'thing.zip')); res.bad = 'no error'; }
+    catch (e) { res.bad = e instanceof ExtractError ? e.message : 'wrong error'; }
+    return res;
+  }, { pdfB64: pdf.toString('base64'), epubB64: epub.toString('base64') });
+
+  ok('plain text is read', out.txt.text.includes('Plain text, straight through'));
+  ok('HTML tags are stripped', out.html.text.includes('Body text that survives') &&
+     !out.html.text.includes('<p>'), out.html.text.slice(0, 60));
+  ok('PDF text is extracted', out.pdf.text.includes('quick brown fox'), out.pdf.text.slice(0, 80));
+  ok('every PDF line is found', out.pdf.text.includes('Second line'), out.pdf.text.slice(0, 120));
+  ok('EPUB chapters are read', out.epub.text.includes('travelled a long way'), out.epub.text.slice(0, 90));
+  ok('EPUB markup is stripped', !out.epub.text.includes('<h1>'));
+  ok('the title comes from the filename', out.pdf.title === 'book');
+  ok('an unknown type is refused', out.bad === 'unsupported', out.bad);
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
 }
 
 /* ------------------------------------------------------------- results */
 
 await browser.close();
 await done();
-console.log(`\n${pass} ta o'tdi, ${fail} ta yiqildi.`);
+console.log(`\n${pass} passed, ${fail} failed.`);
 process.exit(fail ? 1 : 0);

@@ -422,3 +422,13 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .acct{flex:1;min-width:0}
 .acct b{display:block;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct small{display:block;color:var(--faint);font-size:12px}
+
+/* an uploaded document, sitting above the composer */
+.source-chip{display:flex;align-items:center;gap:8px;margin-bottom:7px;padding:8px 10px;
+  border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--line-soft);font-size:13px}
+.source-chip .em{font-size:16px;flex:none}
+.source-chip b{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-chip small{color:var(--muted);flex:none}
+.source-chip button{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  color:var(--muted);flex:none}
+.source-chip button svg{width:13px;height:13px;stroke-width:2.4}

@@ -175,40 +175,40 @@ async function readBody(req) {
  */
 function validate(p) {
   const bad = m => ({ error: m });
-  if (!p || typeof p !== 'object') return bad('bo\'sh so\'rov');
+  if (!p || typeof p !== 'object') return bad('empty request');
 
   const name = String(p.name || '').trim();
-  if (name.length < 2 || name.length > LIMITS.name) return bad('nom 2–28 belgi bo\'lsin');
-  if (!p.files || typeof p.files !== 'object') return bad('fayllar yo\'q');
+  if (name.length < 2 || name.length > LIMITS.name) return bad('the name must be 2-28 characters');
+  if (!p.files || typeof p.files !== 'object') return bad('no files');
 
   const files = Object.entries(p.files).filter(([, v]) => typeof v === 'string');
-  if (!files.length || files.length > LIMITS.files) return bad('fayllar soni noto\'g\'ri');
-  if (!p.files['index.html']) return bad('index.html kerak');
+  if (!files.length || files.length > LIMITS.files) return bad('wrong number of files');
+  if (!p.files['index.html']) return bad('index.html is required');
   for (const [k] of files) {
     if (!/^[a-zA-Z0-9._-]+(\/[a-zA-Z0-9._-]+)*$/.test(k) || k.includes('..'))
-      return bad('fayl nomi noto\'g\'ri: ' + k);
+      return bad('bad file name: ' + k);
   }
 
   const assets = Array.isArray(p.assets) ? p.assets : [];
-  if (assets.length > LIMITS.assets) return bad('rasm juda ko\'p');
+  if (assets.length > LIMITS.assets) return bad('too many images');
   for (const a of assets) {
-    if (typeof a?.data !== 'string' || !a.data.startsWith('data:')) return bad('rasm formati noto\'g\'ri');
-    if (a.data.length > LIMITS.asset) return bad('rasm juda katta');
+    if (typeof a?.data !== 'string' || !a.data.startsWith('data:')) return bad('unsupported image format');
+    if (a.data.length > LIMITS.asset) return bad('image too large');
   }
 
   const size = files.reduce((n, [, v]) => n + v.length, 0)
              + assets.reduce((n, a) => n + a.data.length, 0);
-  if (size > LIMITS.bundle) return bad('ilova juda katta (max 400 KB)');
+  if (size > LIMITS.bundle) return bad('too large (400 KB maximum)');
 
   const html = files.map(([, v]) => v).join('\n');
   if (/<script[^>]+src\s*=\s*["']?\s*(https?:)?\/\//i.test(html))
-    return bad('tashqi skript ishlatilgan — ilova mustaqil bo\'lishi kerak');
+    return bad('external script used — an app must be self-contained');
   if (/<link[^>]+href\s*=\s*["']?\s*(https?:)?\/\//i.test(html))
-    return bad('tashqi stil ishlatilgan — ilova mustaqil bo\'lishi kerak');
+    return bad('external stylesheet used — an app must be self-contained');
   if (/\b(fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(/.test(html) && /https?:\/\//.test(html))
-    return bad('tashqi tarmoqqa murojaat bor — ilova mustaqil bo\'lishi kerak');
+    return bad('it calls out to the network — an app must be self-contained');
   if (p.files['index.html'].replace(/\s/g, '').length < 200)
-    return bad('ilova juda bo\'sh');
+    return bad('there is almost nothing in it');
 
   return { ok: true, size };
 }
@@ -264,7 +264,7 @@ async function authRoute(req, res, action) {
   }
 
   const user = bearer(req);
-  if (!user) return json(res, 401, { error: 'kirish kerak' }, { ...CORS, 'Cache-Control': 'no-store' });
+  if (!user) return json(res, 401, { error: 'sign in required' }, { ...CORS, 'Cache-Control': 'no-store' });
 
   if (action === 'me' && req.method === 'GET') {
     const { used } = quotaState(user);
@@ -309,9 +309,9 @@ function marketIndex(req, res) {
 function marketApp(req, res, id) {
   if (!/^[a-zA-Z0-9_-]{4,40}$/.test(id)) return json(res, 400, { error: 'bad id' }, CORS);
   const row = state.apps.find(a => a.id === id && a.status === 'live');
-  if (!row) return json(res, 404, { error: 'topilmadi' }, CORS);
+  if (!row) return json(res, 404, { error: 'not found' }, CORS);
   const file = path.join(APPS, id + '.json');
-  if (!fs.existsSync(file)) return json(res, 404, { error: 'topilmadi' }, CORS);
+  if (!fs.existsSync(file)) return json(res, 404, { error: 'not found' }, CORS);
   // The id carries the content hash, so this body can never change.
   res.writeHead(200, { ...CORS, 'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'public, max-age=31536000, immutable' });
@@ -332,7 +332,7 @@ function ipState(ip) {
 
 function quota(req, res) {
   const user = bearer(req);
-  if (!user) return json(res, 401, { error: 'kirish kerak' }, { ...CORS, 'Cache-Control': 'no-store' });
+  if (!user) return json(res, 401, { error: 'sign in required' }, { ...CORS, 'Cache-Control': 'no-store' });
   const { used } = quotaState(user);
   json(res, 200, { perDay: PER_DAY, used, left: Math.max(0, PER_DAY - used) },
        { ...CORS, 'Cache-Control': 'no-store' });
@@ -340,24 +340,24 @@ function quota(req, res) {
 
 async function submit(req, res) {
   const user = bearer(req);
-  if (!user) return json(res, 401, { error: 'Joylash uchun kiring' }, CORS);
+  if (!user) return json(res, 401, { error: 'Sign in to publish' }, CORS);
 
   const ip = clientIp(req);
   const { day, used } = quotaState(user);
   const { ipUsed } = ipState(ip);
   if (used >= PER_DAY || ipUsed >= PER_IP)
-    return json(res, 429, { error: `Kuniga ${PER_DAY} ta ilova joylash mumkin. Ertaga urinib ko'ring.` }, CORS);
+    return json(res, 429, { error: `${PER_DAY} app per day. Try again tomorrow.` }, CORS);
 
   let payload;
   try { payload = await readBody(req); }
-  catch { return json(res, 413, { error: 'so\'rov juda katta' }, CORS); }
+  catch { return json(res, 413, { error: 'request too large' }, CORS); }
 
   const v = validate(payload);
   if (v.error) return json(res, 400, { error: v.error }, CORS);
 
   const review = payload.review || {};
   if (review.ok !== true)
-    return json(res, 400, { error: 'AI tekshiruvidan o\'tmagan' }, CORS);
+    return json(res, 400, { error: 'did not pass AI review' }, CORS);
 
   const bundle = {
     name: String(payload.name).trim().slice(0, LIMITS.name),
@@ -373,7 +373,7 @@ async function submit(req, res) {
   const id = slug(bundle.name).slice(0, 18) + '-' + hash;
 
   if (state.apps.some(a => a.id === id))
-    return json(res, 409, { error: 'bu ilova allaqachon joylangan' }, CORS);
+    return json(res, 409, { error: 'this app is already published' }, CORS);
 
   const row = {
     id,
@@ -492,7 +492,7 @@ function statik(req, res, p) {
  */
 setInterval(() => {
   const gone = auth.sweep();
-  if (gone.length) console.log(`${gone.length} ta faolsiz akkaunt o'chirildi`);
+  if (gone.length) console.log(`${gone.length} inactive accounts removed`);
 
   // Yesterday's per-address counters are dead weight; drop them.
   const day = today();
@@ -505,8 +505,8 @@ setInterval(() => {
 setTimeout(() => auth.sweep(), 10_000).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Mini ${PORT}-portda. Ma'lumot: ${DATA} | ${auth.users.length} akkaunt` +
-    (MODERATE ? ' | moderatsiya: yoqilgan' : '') + (ADMIN ? ' | admin: yoqilgan' : ''));
+  console.log(`Mini on :${PORT} | data ${DATA} | ${auth.users.length} accounts` +
+    (MODERATE ? ' | moderation on' : '') + (ADMIN ? ' | admin on' : ''));
 });
 
 /**

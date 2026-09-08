@@ -10,23 +10,29 @@ const KEY = 'mini.v1';
 const APPDATA = 'mini.appdata.';   // per mini-app storage namespace
 
 const DEFAULT_ROLES = [
-  { id:'chat',    emoji:'💬', builtin:true, tools:false,
-    name:{uz:'Suhbat',en:'Chat',ru:'Чат'},
-    prompt:'Sen foydali, qisqa javob beradigan yordamchisan. Foydalanuvchi tilida javob ber.' },
-  { id:'builder', emoji:'🧩', builtin:true, tools:true,
-    name:{uz:'Ilova yasovchi',en:'App builder',ru:'Конструктор'},
+  { id:'builder', emoji:'🧩', builtin:true, tools:true, kind:'app',
+    name:'App builder',
     prompt:'' },
-  { id:'design',  emoji:'🎨', builtin:true, tools:true,
-    name:{uz:'Dizayner',en:'Designer',ru:'Дизайнер'},
-    prompt:'Dizayn birinchi o\'rinda. Har bir ekranni tipografika (aniq o\'lcham shkalasi), bo\'shliq (4px tarmoq), ' +
-           'ierarxiya va harakat orqali qur. Bitta urg\'u rangi, ko\'p havo, yumshoq soya, 16-24px radius. ' +
-           'Tungi va kunduzgi rejim ikkalasi ham chiroyli bo\'lsin.' },
-  { id:'coder',   emoji:'⚡', builtin:true, tools:true,
-    name:{uz:'Dasturchi',en:'Coder',ru:'Программист'},
-    prompt:'Sen tajribali dasturchisan. Toza, sodda, ishlaydigan kod yoz. Ortiqcha izohsiz.' },
+  { id:'course',  emoji:'🎓', builtin:true, tools:true, kind:'course',
+    name:'Course builder',
+    prompt:'' },
+  { id:'book',    emoji:'📖', builtin:true, tools:true, kind:'book',
+    name:'Book writer',
+    prompt:'' },
+  { id:'design',  emoji:'🎨', builtin:true, tools:true, kind:'app',
+    name:'Designer',
+    prompt:'Design leads. Build every screen from a type scale, a 4px spacing grid, ' +
+           'clear hierarchy and restrained motion. One accent colour, generous whitespace, ' +
+           'soft shadows, 16–24px radii. Both colour schemes must look deliberate.' },
+  { id:'coder',   emoji:'⚡', builtin:true, tools:true, kind:'app',
+    name:'Coder',
+    prompt:'You are an experienced engineer. Clean, small, working code. No commentary in the chat.' },
+  { id:'chat',    emoji:'💬', builtin:true, tools:false,
+    name:'Chat',
+    prompt:'You are a helpful assistant. Answer briefly.' },
   { id:'writer',  emoji:'✍️', builtin:true, tools:false,
-    name:{uz:'Matn',en:'Writer',ru:'Текст'},
-    prompt:'Sen matn muharririsan. Aniq, jonli va qisqa yoz.' },
+    name:'Writer',
+    prompt:'You are an editor. Write clearly, concretely and short.' },
 ];
 
 const DEFAULTS = {
@@ -36,7 +42,6 @@ const DEFAULTS = {
     apiKey: '',
     model: '',
     modelName: '',
-    lang: '',                 // '' = auto-detect from navigator
     theme: 'system',
     temperature: 0.7,
     historyLimit: 24,         // messages kept in the request window

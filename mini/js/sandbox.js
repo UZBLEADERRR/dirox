@@ -71,9 +71,9 @@ const SHIM = `
     var el = e.target;
     if (el && el !== window && el.tagName) {           /* a resource, not a throw */
       var src = (el.currentSrc || el.src || el.href || '').slice(0, 60);
-      return note(LOG.errors, el.tagName.toLowerCase() + ' yuklanmadi: ' + (src || '(manbasiz)'));
+      return note(LOG.errors, el.tagName.toLowerCase() + ' failed to load: ' + (src || '(no source)'));
     }
-    note(LOG.errors, (e.message || 'xato') + (e.lineno ? ' @' + e.lineno : ''));
+    note(LOG.errors, (e.message || 'error') + (e.lineno ? ' @' + e.lineno : ''));
   }, true);
   window.addEventListener('unhandledrejection', function(e){
     note(LOG.errors, 'Promise: ' + ((e.reason && (e.reason.message || e.reason)) || 'rejected'));
@@ -180,7 +180,7 @@ const esc = s => String(s).replace(/<\/script/gi, '<\\/script');
 export function compose(project, { seed = {} } = {}) {
   const files = project.files || {};
   let html = files['index.html'] || files['index.htm'] ||
-    '<!doctype html><html><body><p style="font:16px system-ui;padding:24px">index.html topilmadi</p></body></html>';
+    '<!doctype html><html><body><p style="font:16px system-ui;padding:24px">No index.html</p></body></html>';
 
   // <link rel=stylesheet href="x.css">  ->  <style>…</style>
   html = html.replace(/<link[^>]+href=["']?([^"'\s>]+\.css)["']?[^>]*>/gi,
@@ -232,6 +232,19 @@ function rewriteStorage(html) {
              (m, open, body, close) => open + swap(body) + close)
     .replace(/\son([a-z]+)=(["'])([\s\S]*?)\2/gi,
              (m, ev, q, body) => ` on${ev}=${q}${swap(body)}${q}`);
+}
+
+/**
+ * The same document with every script removed.
+ *
+ * Used for printing: the print view runs in a top-level window on this origin,
+ * so nothing from the app may execute there. What is left is the markup and
+ * the print stylesheet, which is all a PDF needs.
+ */
+export function printableHtml(project, seed = {}) {
+  return compose(project, { seed })
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/\son([a-z]+)=(["'])[\s\S]*?\2/gi, '');
 }
 
 /* ----------------------------------------------------------------- mount */
@@ -328,16 +341,16 @@ export async function runCheck(project, { interact = true, shot = false } = {}) 
 export function formatCheck(r) {
   const L = [];
   if (r.fatal) L.push(`FATAL: ${r.fatal}`);
-  if (r.blank) L.push('BO\'SH: sahifada ko\'rinadigan narsa yo\'q.');
+  if (r.blank) L.push('BLANK: nothing visible on the page.');
   L.push(`title="${r.title || ''}" nodes=${r.nodes || 0} text=${r.chars || 0}ch controls=${r.controlCount || 0}`);
   if (r.controls?.length) L.push('UI: ' + r.controls.join(', '));
-  if (r.overflowX) L.push('OGOHLANTIRISH: gorizontal scroll bor (mobil ekranga sig\'maydi).');
-  if (r.offscreen) L.push(`OGOHLANTIRISH: ${r.offscreen} element ekran chetidan chiqib ketgan.`);
-  if (r.clicked != null) L.push(`Bosildi: ${r.clicked} tugma.`);
+  if (r.overflowX) L.push('WARNING: the page scrolls horizontally — it does not fit a phone.');
+  if (r.offscreen) L.push(`WARNING: ${r.offscreen} elements run past the right edge.`);
+  if (r.clicked != null) L.push(`Clicked ${r.clicked} controls.`);
   const errs = [...new Set([...(r.errors || []), ...(r.clickErrors || [])])];
-  if (errs.length) L.push('XATOLAR:\n- ' + errs.slice(0, 8).join('\n- '));
-  else L.push('Xato yo\'q.');
-  if (r.warns?.length) L.push('Warn: ' + r.warns.slice(0, 3).join(' | '));
-  if (r.text) L.push('Ko\'ringan matn: ' + r.text.slice(0, 200));
+  if (errs.length) L.push('ERRORS:\n- ' + errs.slice(0, 8).join('\n- '));
+  else L.push('No errors.');
+  if (r.warns?.length) L.push('Warnings: ' + r.warns.slice(0, 3).join(' | '));
+  if (r.text) L.push('Visible text: ' + r.text.slice(0, 200));
   return L.join('\n').slice(0, 1600);
 }

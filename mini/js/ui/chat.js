@@ -1,12 +1,13 @@
 /** The chat screen: messages, the composer, and the agent turn it drives. */
 
 import { state, save, activeChat, touch, getRole, getApp, publishApp } from '../store.js';
-import { t, currentLang } from '../i18n.js';
+import { t } from '../i18n.js';
 import { md } from '../md.js';
 import { Agent } from '../agent.js';
 import { openPublish, openSettings } from './sheets.js';
 import { openPublishToMarket } from './market.js';
 import { $, el, toast, readImage, svg, ICON } from './dom.js';
+import { extractText, ExtractError, EXTRACT_MESSAGES } from '../extract.js';
 
 let agent = null, pending = [];         // pending = attached images for the next send
 let onOpenApp = null;                   // injected by main.js
@@ -21,9 +22,9 @@ export function renderChat() {
   const box = $('#messages');
   box.innerHTML = '';
 
+  renderSource();
   $('#role-emoji').textContent = role.emoji;
-  $('#role-name').textContent =
-    typeof role.name === 'object' ? (role.name[currentLang()] || role.name.uz) : role.name;
+  $('#role-name').textContent = role.name;
   $('#input').placeholder = t('ask');
 
   if (!chat.messages.length) { box.append(emptyState(chat)); return; }
@@ -76,17 +77,22 @@ function artifactCard(chat) {
   const p = chat.project;
   if (!p?.files?.['index.html']) return null;
   const app = chat.appId ? getApp(chat.appId) : null;
-  const name = app?.name || 'Ilova';
-  const emoji = app?.emoji || '📱';
+  const name = app?.name || p.course?.title || p.book?.title || 'App';
+  const emoji = app?.emoji || (p.course ? '🎓' : p.book ? '📖' : '📱');
   const color = app?.color || '#7c8cff';
   const size = Object.values(p.files).reduce((n, v) => n + v.length, 0);
+  const detail = p.course
+    ? `${p.course.modules.reduce((n, m) => n + m.lessons.length, 0)} lessons · ${Math.round(size / 102.4) / 10} KB`
+    : p.book
+    ? `${p.book.chapters.length} chapters · ${Math.round(size / 102.4) / 10} KB`
+    : `${Object.keys(p.files).length} files · ${Math.round(size / 102.4) / 10} KB`;
 
   return el('div', { class:'artifact' },
     el('div', { class:'artifact-head' },
       el('div', { class:'artifact-ico', style:{ background:color }, text:emoji }),
       el('div', { class:'artifact-meta' },
         el('b', { text:name }),
-        el('span', { text:`${Object.keys(p.files).join(', ')} · ${Math.round(size/102.4)/10} KB` }))),
+        el('span', { text: detail }))),
     el('div', { class:'artifact-actions' },
       el('button', { class:'btn', text:t('preview'), onClick:() => onOpenApp?.({
         id: chat.appId || 'draft', name, emoji, color, files:p.files, assets:p.assets,
@@ -121,11 +127,52 @@ function renderPending() {
       el('button', { onClick:() => { pending.splice(i, 1); renderPending(); } }, svg(ICON.x)))));
 }
 
+/**
+ * Images become attachments the model can look at; documents become the
+ * project's source, which a course or a book can then be built from.
+ */
 export async function attachFiles(files) {
   for (const f of [...files].slice(0, 4)) {
-    try { addPending(await readImage(f)); }
-    catch { toast(t('error')); }
+    if (f.type.startsWith('image/')) {
+      try { addPending(await readImage(f)); } catch { toast(t('error')); }
+      continue;
+    }
+    await attachDocument(f);
   }
+}
+
+async function attachDocument(file) {
+  const chat = activeChat();
+  toast(t('reading'));
+  try {
+    const doc = await extractText(file, { maxChars: 200_000 });
+    chat.project.source = { title: doc.title, text: doc.text, kind: doc.kind };
+    save();
+    renderSource();
+    toast(`${doc.title} — ${Math.round(doc.chars / 1000)}k ${t('words')}` +
+          (doc.truncated ? `. ${t('sourceTooBig')}` : ''));
+  } catch (e) {
+    toast(e instanceof ExtractError
+      ? (EXTRACT_MESSAGES[e.message] || t('unsupportedFile'))
+      : `${t('error')}: ${e.message}`, 4200);
+  }
+}
+
+/** The uploaded document sits above the composer until it is removed. */
+function renderSource() {
+  const chat = activeChat();
+  const box = $('#source-chip');
+  const src = chat.project?.source;
+  box.hidden = !src;
+  if (!src) return;
+  box.innerHTML = '';
+  box.append(
+    el('span', { class:'em', text:'📄' }),
+    el('b', { text:src.title }),
+    el('small', { text:`${Math.round(src.text.length / 1000)}k` }),
+    el('button', { 'aria-label':'Remove', onClick:() => {
+      delete chat.project.source; save(); renderSource();
+    }}, svg(ICON.x)));
 }
 
 /* -------------------------------------------------------------- sending */
@@ -152,10 +199,10 @@ export async function send() {
   if (pending.length && role.tools) {
     chat.project.assets ||= [];
     for (const data of pending) {
-      chat.project.assets.push({ name:`rasm${chat.project.assets.length + 1}.png`, data });
+      chat.project.assets.push({ name:`image${chat.project.assets.length + 1}.png`, data });
     }
   }
-  if (!chat.title) chat.title = (text || 'Rasm').slice(0, 42);
+  if (!chat.title) chat.title = (text || 'Image').slice(0, 42);
   pending = []; renderPending();
   input.value = ''; input.style.height = 'auto';
   touch(chat);

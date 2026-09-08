@@ -69,13 +69,13 @@ http.createServer((req, res) => {
     let msgs = [];
     try { msgs = JSON.parse(body).messages || []; } catch {}
     // The store reviewer asks for strict JSON and nothing else.
-    if (/moderatorisan/.test(msgs[0]?.content || '')) {
+    if (/moderator of an app store/.test(msgs[0]?.content || '')) {
       const asked = JSON.stringify(msgs).toLowerCase();
       const reject = /reject-me/.test(asked);
       return sse(res, textChunks(JSON.stringify(reject
-        ? { ok:false, score:1, note:'Ilova tugallanmagan.' }
-        : { ok:true, score:4, note:'Ishlaydi va foydali.', summary:'Oddiy kalkulyator.',
-            category:'asboblar', categoryName:'Asboblar', categoryIcon:'🧰', tags:['hisob','asbob'] })));
+        ? { ok:false, score:1, note:'Unfinished.' }
+        : { ok:true, score:4, note:'Works and is useful.', summary:'A simple calculator.',
+            category:'tools', categoryName:'Tools', categoryIcon:'🧰', tags:['math','tool'] })));
     }
 
     const done = msgs.filter(m => m.role === 'tool').length;
@@ -83,21 +83,92 @@ http.createServer((req, res) => {
     const first = msgs.find(m => m.role === 'user');
     const firstText = typeof first?.content === 'string' ? first.content
       : (first?.content || []).map(p => p.text || '').join(' ');
-    const wantsShot = /surat/i.test(firstText);
 
-    // Record what the client sends back after a screenshot, so the test can
-    // assert the image actually made the round trip.
+    // Record what the client sends back, so tests can assert the round trip.
     const imgs = msgs.flatMap(m => Array.isArray(m.content)
       ? m.content.filter(p => p.type === 'image_url').map(p => p.image_url.url.slice(0, 24)) : []);
+    const toolNames = [...new Set((msgs.flatMap(m => m.tool_calls || [])).map(c => c.function.name))];
     fs.writeFileSync(new URL('./last-request.json', import.meta.url),
-      JSON.stringify({ done, imgs, roles: msgs.map(m => m.role) }, null, 1));
+      JSON.stringify({ done, imgs, toolNames, roles: msgs.map(m => m.role),
+                       system: (msgs[0]?.content || '').slice(0, 400) }, null, 1));
 
-    if (done === 0) return sse(res, [...textChunks('Kalkulyator yasayapman.'), toolChunk('write_file',
+    /* ---------------------------------------------------------- course */
+
+    if (/course/i.test(firstText)) {
+      const LESSONS = [
+        ['intro', 'What the test looks like'],
+        ['listening', 'Listening: maps and forms'],
+        ['writing', 'Writing task 1 in four moves'],
+      ];
+      if (done === 0) return sse(res, [...textChunks('Building the course.'),
+        toolChunk('course_outline', {
+          title:'IELTS Band 7', subtitle:'From 6.0 to 7.0 in six weeks.',
+          language:'en', accent:'#E8171F',
+          modules:[{ title:'Foundations', lessons:[
+            { id:'intro', title:LESSONS[0][1], minutes:8 },
+            { id:'listening', title:LESSONS[1][1], minutes:14 }] },
+            { title:'Writing', lessons:[{ id:'writing', title:LESSONS[2][1], minutes:20 }] }] }), usage]);
+
+      if (done <= LESSONS.length) {
+        const [id, title] = LESSONS[done - 1];
+        return sse(res, [toolChunk('write_lesson', { id, html:
+          `<p>By the end you will handle <b>${title}</b>.</p>` +
+          '<div class="key"><b>Key idea</b><p>Answers follow the order of the recording.</p></div>' +
+          '<h2>How it works</h2><p>Read the labels first, then listen once.</p>' +
+          '<div class="q" data-a="1"><p>How many times do you hear it?</p>' +
+          '<ul><li>Twice</li><li>Once</li><li>Three times</li></ul>' +
+          '<p class="why">Once — which is why you read first.</p></div>' +
+          '<div class="fill" data-a="once">You hear the recording ___.</div>' +
+          '<h2>Recap</h2><p>Read, predict, listen once, write.</p>' }), usage]);
+      }
+      if (done === LESSONS.length + 1) return sse(res, [toolChunk('run_check', {}), usage]);
+      if (done === LESSONS.length + 2) return sse(res, [toolChunk('publish_app',
+        { name:'IELTS Band 7', emoji:'🎓', color:'#E8171F' }), usage]);
+      return sse(res, [...textChunks('Your course is ready — three lessons to start with.'), usage]);
+    }
+
+    /* ------------------------------------------------------------ book */
+
+    if (/book/i.test(firstText)) {
+      const CH = [['origins', 'Where coffee comes from'], ['roast', 'The roast decides everything']];
+      if (done === 0) return sse(res, [...textChunks('Writing the book.'),
+        toolChunk('book_outline', { title:'The Bean', author:'Mini', subtitle:'A short history of coffee.',
+          language:'en', accent:'#B00811',
+          chapters:CH.map(([id, title]) => ({ id, title })) }), usage]);
+      if (done <= CH.length) {
+        const [, title] = CH[done - 1];
+        return sse(res, [toolChunk('write_chapter', { id: CH[done - 1][0], html:
+          `<p>The story of ${title.toLowerCase()} begins on a hillside.</p>` +
+          '<h2>A closer look</h2><p>Ethiopian farmers picked the cherries by hand.</p>' +
+          '<blockquote>Coffee is a language in itself.</blockquote>' +
+          '<p>What follows is the part everyone gets wrong.</p>' }), usage]);
+      }
+      if (done === CH.length + 1) return sse(res, [toolChunk('set_cover',
+        { svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600">' +
+              '<rect width="400" height="600" fill="#2b0407"/>' +
+              '<text x="200" y="280" fill="#fff" font-size="42" text-anchor="middle">The Bean</text></svg>' }), usage]);
+      if (done === CH.length + 2) return sse(res, [toolChunk('run_check', {}), usage]);
+      if (done === CH.length + 3) return sse(res, [toolChunk('publish_app',
+        { name:'The Bean', emoji:'📖', color:'#B00811' }), usage]);
+      return sse(res, [...textChunks('The book is done — two chapters and a cover.'), usage]);
+    }
+
+    /* -------------------------------------------------- source reading */
+
+    if (/from the document|uploaded/i.test(firstText)) {
+      if (done === 0) return sse(res, [toolChunk('read_source', { part:1 }), usage]);
+      return sse(res, [...textChunks('Read it.'), usage]);
+    }
+
+    /* ------------------------------------------------------------- app */
+
+    const wantsShot = /screenshot|surat/i.test(firstText);
+    if (done === 0) return sse(res, [...textChunks('Building a calculator.'), toolChunk('write_file',
       { path:'index.html', content: APP_HTML }), usage]);
     if (done === 1) return sse(res, [toolChunk('run_check', {}), usage]);
     if (wantsShot && done === 2) return sse(res, [toolChunk('screenshot', {}), usage]);
     if (done === (wantsShot ? 3 : 2)) return sse(res, [toolChunk('publish_app',
-      { name:'Kalkulyator', emoji:'🧮', color:'#22c55e' }), usage]);
-    return sse(res, [...textChunks('Tayyor! Kalkulyator ekraningizga qo\'shildi.'), usage]);
+      { name:'Calculator', emoji:'🧮', color:'#22c55e' }), usage]);
+    return sse(res, [...textChunks('Done — the calculator is on your screen.'), usage]);
   });
 }).listen(PORT, () => console.log('mock provider on ' + PORT));

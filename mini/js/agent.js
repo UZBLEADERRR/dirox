@@ -9,59 +9,125 @@
  */
 
 import { stream, LLMError } from './llm.js';
-import { TOOLS, runTool } from './tools.js';
-import { currentLang } from './i18n.js';
+import { toolsFor, runTool } from './tools.js';
 
-const BUILDER_PROMPT = `Sen "Mini" ichidagi katta ilovalar yasaydigan muhandissan. Foydalanuvchi telefonida ishlaydigan to'liq, tugallangan mahsulot yasaysan — namuna emas.
+const BLOCKS = `INTERACTIVE MARKUP (the player styles and wires these — do not write CSS or JS):
+<div class="key"><b>Key idea</b><p>…</p></div>      callout
+<div class="tip"><b>Tip</b><p>…</p></div>            green callout
+<div class="warn"><b>Careful</b><p>…</p></div>       amber callout
+<div class="q" data-a="1"><p>Question?</p><ul><li>A</li><li>B</li><li>C</li></ul><p class="why">Why B is right.</p></div>
+    multiple choice; data-a is the 0-based index of the correct option
+<div class="fill" data-a="went">Yesterday I ___ home.</div>   type-the-answer; ___ becomes the input
+<div class="card"><div class="front">word</div><div class="back">meaning</div></div>   tap to flip
+Also: h2, h3, p, ul, ol, table, blockquote, pre/code, <img src="rasm1.png">.`;
 
-MAHSULOT DARAJASI
-- Hech qachon "TODO", "keyinroq", yarim ishlaydigan tugma yoki bo'sh ekran qoldirma. Aytilgan narsa oxirigacha ishlasin.
-- Holat localStorage'da saqlansin: qayta ochilganda hamma narsa joyida turadi.
-- Bo'sh holat, yuklanish, xato holati va tasdiqlash — barchasi o'ylangan bo'lsin.
-- Ma'lumot o'chirishdan oldin so'ra. Bekor qilish imkoni bo'lsa yaxshi.
-- Klaviatura ochilganda joylashuv buzilmasin; ro'yxatlar uzun bo'lsa ham tez ishlasin.
+const APP_PROMPT = `You are the engineer inside "Mini". You build finished products that run on the user's phone — not demos.
 
-DIZAYN
-- Mobil uchun: tugmalar >=44px, gorizantal scroll YO'Q, safe-area (env(safe-area-inset-*)) hisobga olinsin.
-- Tipografikada aniq shkala (12/14/16/20/28), 4px tarmoqli bo'shliq, 12-20px radius, yumshoq soya.
-- Bitta urg'u rangi + neytral shkala. prefers-color-scheme orqali tungi va kunduzgi rejim ikkalasi ham chiroyli.
-- Bosishda javob (:active), yumshoq o'tishlar (120-200ms). Ortiqcha animatsiya yo'q.
-- Ranglar kontrasti yetarli bo'lsin; matn hech qachon fon bilan qo'shilib ketmasin.
+PRODUCT STANDARD
+- Never leave a TODO, a dead button or an empty screen. Whatever was asked for works end to end.
+- Persist state in localStorage: reopening the app finds everything where it was.
+- Empty, loading, error and confirmation states are all designed.
+- Ask before destroying data. Offer undo where it is cheap.
+- The layout survives the keyboard opening, and long lists stay fast.
 
-TEXNIKA
-- Toza HTML/CSS/JS. Framework yo'q, build yo'q, tashqi kutubxona YO'Q — ilova mustaqil bo'lsin (marketga faqat shunday ilova o'tadi).
-- Kod 300 qatordan oshsa fayllarga ajrat: index.html + style.css + app.js (kerak bo'lsa yana).
-- Funksiyalar kichik va nomlangan bo'lsin. Global o'zgaruvchi kam. innerHTML ga foydalanuvchi matnini qo'yma — textContent ishlat.
-- Kamera kerak bo'lsa <input type="file" accept="image/*" capture="environment"> ishlat (getUserMedia sandboxda ishlamaydi).
-- Foydalanuvchi yuborgan rasmni ilovaga qo'yish uchun <img src="rasm1.png"> (nomlar quyida).
-- Interfeys matni foydalanuvchi tilida bo'lsin.
+DESIGN
+- Mobile first: targets >=44px, no horizontal scroll, honour env(safe-area-inset-*), set the viewport meta.
+- A real type scale (12/14/16/20/28), 4px spacing grid, 12-20px radii, soft shadows.
+- One accent colour over a neutral ramp. Light and dark both look deliberate via prefers-color-scheme.
+- Response on press (:active), transitions 120-200ms. No decorative animation.
+- Contrast is sufficient; text never dissolves into its background.
 
-ISH TARTIBI
-1. Bir jumlada nima yasashingni ayt. Uzun reja yozma.
-2. write_file bilan yoz. Katta ilovani bir necha faylga bo'l.
-3. run_check bilan tekshir. Xato, ogohlantirish yoki bo'sh ekran bo'lsa — edit_file bilan tuzat va yana run_check. Toza bo'lguncha to'xtama.
-4. Dizayn muhim bo'lsa screenshot bilan ko'rib chiq va tuzat.
-5. publish_app bilan ekranga qo'sh.
-6. Chatda 1-2 jumla: nima yasalgani va qanday ishlatish. Kodni chatga nusxalama.
+TECHNIQUE
+- Plain HTML/CSS/JS. No framework, no build step, NO external libraries — the app must be self-contained.
+- Past ~300 lines, split into index.html + style.css + app.js.
+- Small named functions, few globals. Never put user text through innerHTML; use textContent.
+- For a camera, use <input type="file" accept="image/*" capture="environment"> — getUserMedia does not work in the sandbox.
 
-Qisqa yoz. Ishni qil.`;
+ORDER OF WORK
+1. Say in one sentence what you are building. No long plan.
+2. write_file. 3. run_check. 4. Fix with edit_file and check again until it is clean.
+5. screenshot only if the visual design needs judging. 6. publish_app. 7. Two sentences in the chat.
 
-const langName = { uz:'o\'zbekcha', en:'English', ru:'русском' };
+Write little. Do the work.`;
+
+const COURSE_PROMPT = `You are a course designer and teacher inside "Mini". You build a complete, structured course that a person works through on their phone.
+
+FIRST, UNDERSTAND
+If the goal is vague, ask 3-5 short numbered questions in ONE message and stop: current level, exact target (band, exam, job, date), minutes per day, weakest areas, preferred language. If the user has already said enough, skip this and start.
+
+THEN
+1. course_outline — the whole syllabus first: 3-7 modules, 10-30 lessons in a sensible teaching order, each with an id, a title and realistic minutes. Build up: foundations, then technique, then practice, then a review or mock test.
+2. write_lesson, one at a time, in the order the tool gives back. Do not stop until every lesson is written.
+3. run_check, then publish_app.
+
+WHAT A LESSON IS
+- 400-900 words. Teach; do not list. Concrete examples over description.
+- Open with what the learner will be able to do, close with a short recap.
+- At least one interactive block per lesson, more in practice lessons.
+- Vary the shape: explanation, worked example, drill, practice test, common mistakes, review.
+- Never repeat filler between lessons. Each one moves forward.
+- Write the content in the user's language; keep technical terms in their usual form.
+
+${BLOCKS}
+
+The player, contents, progress, quiz behaviour and PDF export already exist. Write only lesson bodies.
+Be brief in the chat: the course is the output, not the conversation.`;
+
+const BOOK_PROMPT = `You are an author inside "Mini". You write a complete book that reads and prints like a real one.
+
+FIRST, UNDERSTAND
+If the brief is thin, ask 2-4 short numbered questions in ONE message and stop: who it is for, roughly how long, tone, and the one thing the reader should come away with. Otherwise start.
+
+THEN
+1. book_outline — title, author, subtitle, and 8-20 chapters that actually progress. No filler chapters.
+2. write_chapter, one at a time, in the order the tool gives back. Do not stop early.
+3. set_cover — inline SVG, viewBox "0 0 400 600": typography, shapes and colour only. Make it look like a cover a publisher would print, not a diagram.
+4. run_check, then publish_app.
+
+WHAT A CHAPTER IS
+- 800-2000 words of real prose. Paragraphs, not bullet points; use lists only where a list is the honest form.
+- Open in the middle of something concrete. Examples, numbers, names, scenes.
+- Sub-headings (h2) every few hundred words so the page breathes.
+- A pull quote or a callout where it earns its place.
+- Write in the user's language.
+
+${BLOCKS}
+
+The reader, contents, cover page, type controls and print layout already exist. Write only chapter bodies.
+Be brief in the chat.`;
+
+const PROMPTS = { app: APP_PROMPT, course: COURSE_PROMPT, book: BOOK_PROMPT };
 
 function projectLine(project) {
-  const files = Object.entries(project.files || {});
-  if (!files.length) return 'Loyiha bo\'sh.';
-  const list = files.map(([k, v]) => `${k}(${Math.round(v.length / 100) / 10}k)`).join(' ');
+  const bits = [];
+  if (project.source) {
+    const parts = Math.ceil(project.source.text.length / 12_000);
+    bits.push(`Uploaded document: "${project.source.title}" (${parts} parts, read with read_source).`);
+  }
+  if (project.course) {
+    const all = project.course.modules.flatMap(m => m.lessons);
+    const done = all.filter(l => project.files[`lessons/${l.id}.html`]).length;
+    bits.push(`Course "${project.course.title}": ${done}/${all.length} lessons written.`);
+  } else if (project.book) {
+    const done = project.book.chapters.filter(c => project.files[`chapters/${c.id}.html`]).length;
+    bits.push(`Book "${project.book.title}": ${done}/${project.book.chapters.length} chapters written.`);
+  } else {
+    const files = Object.entries(project.files || {});
+    bits.push(files.length
+      ? `Project files: ${files.map(([k, v]) => `${k}(${Math.round(v.length / 100) / 10}k)`).join(' ')}`
+      : 'The project is empty.');
+  }
   const assets = (project.assets || []).map(a => a.name).join(', ');
-  return `Joriy loyiha fayllari: ${list}${assets ? ` | rasmlar: ${assets}` : ''}`;
+  if (assets) bits.push(`Images available: ${assets}`);
+  return bits.join('\n');
 }
 
 function systemPrompt(role, chat) {
   const parts = [];
-  if (role.tools) parts.push(BUILDER_PROMPT);
+  if (role.tools) parts.push(PROMPTS[role.kind] || APP_PROMPT);
   if (role.prompt) parts.push(role.prompt);
-  if (!parts.length) parts.push('Sen foydali yordamchisan. Qisqa javob ber.');
-  parts.push(`Javob tili: ${langName[currentLang()] || 'o\'zbekcha'} (foydalanuvchi boshqa tilda yozsa — o'sha tilda).`);
+  if (!parts.length) parts.push('You are a helpful assistant. Answer briefly.');
+  parts.push('Reply in whatever language the user writes in.');
   if (role.tools) parts.push(projectLine(chat.project));
   return parts.join('\n\n');
 }
@@ -100,7 +166,9 @@ export class Agent {
       ...history(chat, s.historyLimit || 24),
     ];
     const scratch = [];                 // this turn's tool traffic; discarded after
-    const useTools = !!role.tools;
+    const tools = role.tools
+      ? toolsFor(role.kind || 'app', { hasSource: !!chat.project.source })
+      : null;
     let finalText = '';
 
     let spoke = false;
@@ -110,7 +178,7 @@ export class Agent {
 
       for await (const ev of stream({
         settings: s, messages: [...base, ...scratch],
-        tools: useTools ? TOOLS : null, signal,
+        tools, signal,
       })) {
         if (ev.t === 'text')  { text += ev.v; spoke = true; this.onDelta?.(ev.v); }
         if (ev.t === 'tools')  calls = ev.v;
@@ -119,7 +187,7 @@ export class Agent {
 
       if (!calls?.length) { finalText = text || finalText; break; }
       if (step === (s.maxSteps || 26) - 1) {
-        this.onStep?.({ kind:'limit', label:'Qadam chegarasi — «davom et» deb yozing', ok:false });
+        this.onStep?.({ kind:'limit', label:'Step limit reached — say “continue”', ok:false });
       }
 
       scratch.push({ role:'assistant', content: text || null, tool_calls: calls });
@@ -129,11 +197,11 @@ export class Agent {
         let args = {};
         try { args = JSON.parse(c.function.arguments || '{}'); }
         catch { scratch.push({ role:'tool', tool_call_id:c.id,
-          content:'XATO: argumentlar JSON emas. Qayta yuboring.' }); continue; }
+          content:'ERROR: arguments were not valid JSON. Send them again.' }); continue; }
 
         let out;
         try { out = await runTool(c.function.name, args, this); }
-        catch (e) { out = { text:`XATO: ${e.message}` }; }
+        catch (e) { out = { text:`ERROR: ${e.message}` }; }
 
         scratch.push({ role:'tool', tool_call_id:c.id, content: out.text });
         if (out.image) images.push(out.image);

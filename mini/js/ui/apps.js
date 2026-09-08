@@ -1,11 +1,11 @@
 /** The home screen of mini-apps, and the player that runs one. */
 
-import { state, getApp } from '../store.js';
+import { state, getApp, appData } from '../store.js';
 import { t } from '../i18n.js';
-import { mount } from '../sandbox.js';
+import { mount, printableHtml } from '../sandbox.js';
 import { restoreIdentity, applyAppIdentity } from '../icons.js';
 import { openAppMenu } from './sheets.js';
-import { $, el, svg, ICON, pushHistory } from './dom.js';
+import { $, el, svg, ICON, pushHistory, toast } from './dom.js';
 
 let running = null;
 let hooks = {};
@@ -34,6 +34,7 @@ export function renderApps() {
       onOpen: () => openApp(app),
       onEdit: () => hooks.editApp?.(app),
       onMarket: () => hooks.onMarket?.(app),
+      onPrint: () => printApp(app),
       onChanged: renderApps,
     });
 
@@ -86,9 +87,25 @@ export function openApp(app, { bare = false } = {}) {
       onOpen: () => openApp(real),
       onEdit: () => { closeApp(); hooks.editApp?.(real); },
       onMarket: () => { closeApp(); hooks.onMarket?.(real); },
+      onPrint: () => printApp(real),
       onChanged: () => { closeApp(); renderApps(); },
     });
   };
+}
+
+/**
+ * Opens a script-free copy in a normal window and asks the browser to print
+ * it. On a phone that dialog offers "Save as PDF", which is how a course or a
+ * book leaves this app as a real document.
+ */
+export function printApp(app) {
+  const w = window.open('', '_blank');
+  if (!w) return toast('Allow pop-ups to save a PDF');
+  w.document.open();
+  w.document.write(printableHtml(app, appData(app.id || 'draft')));
+  w.document.close();
+  const go = () => setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 350);
+  w.document.readyState === 'complete' ? go() : w.addEventListener('load', go);
 }
 
 export function closeApp() {

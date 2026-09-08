@@ -1,7 +1,7 @@
 /** Every modal in the app. Bottom sheets, because thumbs live at the bottom. */
 
 import { state, save, allRoles, uid, storageBytes, deleteApp, publishApp } from '../store.js';
-import { t, setLang, LANGS, currentLang } from '../i18n.js';
+import { t } from '../i18n.js';
 import { listModels } from '../llm.js';
 import { PALETTE, EMOJIS, iconDataUrl, applyAppIdentity } from '../icons.js';
 import { $, el, openSheet, closeSheet, confirmSheet, switchRow, field, toast, fmtBytes, ICON, svg } from './dom.js';
@@ -10,7 +10,7 @@ const PROVIDERS = [
   ['OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
   ['Groq',       'https://api.groq.com/openai/v1', 'https://console.groq.com/keys'],
   ['OpenAI',     'https://api.openai.com/v1', 'https://platform.openai.com/api-keys'],
-  ['Boshqa',     '', ''],
+  ['Other',      '', ''],
 ];
 
 const providerOf = url => PROVIDERS.find(p => p[1] && url.startsWith(p[1])) || PROVIDERS[3];
@@ -44,8 +44,8 @@ export function openSettings(afterChange) {
       provRow,
       el('div', { style:{ height:'12px' } }),
       field(t('apiKey'), key, provider[2]
-        ? `Kalitni <a href="${provider[2]}" target="_blank" rel="noopener">${provider[0]}</a> saytidan oling. Kalit faqat shu telefonda saqlanadi.`
-        : 'Kalit faqat shu telefonda saqlanadi.'),
+        ? `Get a key from <a href="${provider[2]}" target="_blank" rel="noopener">${provider[0]}</a>. It stays on this phone only.`
+        : 'The key stays on this phone only.'),
       field(t('baseUrl'), base),
       el('button', { class:'list-item', onClick:() => openModels(afterChange) },
         el('span', { class:'em', text:'🧠' }),
@@ -60,23 +60,17 @@ export function openSettings(afterChange) {
           autocapitalize:'off', spellcheck:'false' });
         mk.addEventListener('change', () => { s.marketUrl = mk.value.trim(); save(); });
         return field(t('marketUrl'), mk,
-          'Bo\'sh qoldirsangiz shu saytning o\'zi ishlatiladi. O\'z serveringizni qo\'ysangiz — market o\'shandan o\'qiydi.');
+          'Leave empty to use this site. Point it elsewhere to read a different market.');
       })(),
       el('h4', { text:t('roles') }),
       ...allRoles().map(r => el('button', { class:'list-item', onClick:() => openRoleEditor(r, rerender) },
         el('span', { class:'em', text:r.emoji }),
         el('span', { class:'txt' },
-          el('b', { text: typeof r.name === 'object' ? (r.name[currentLang()] || r.name.uz) : r.name }),
+          el('b', { text: r.name }),
           el('small', { text: r.tools ? t('roleTools') : (r.prompt || '').slice(0, 48) })))),
       el('button', { class:'list-item', onClick:() => openRoleEditor(null, rerender) },
         el('span', { class:'em', text:'＋' }),
         el('span', { class:'txt' }, el('b', { text:t('newRole') }))),
-
-      el('h4', { text:t('lang') }),
-      el('div', { class:'seg' }, ...LANGS.map(([code, name]) =>
-        el('button', { class: (s.lang || '') === code ? 'on' : '', text:name, onClick:() => {
-          s.lang = code; save(true); setLang(code); location.reload();
-        }}))),
 
       el('h4', { text:t('theme') }),
       el('div', { class:'seg' }, ...[['system',t('system')],['dark',t('dark')],['light',t('light')]].map(([v,n]) =>
@@ -84,23 +78,23 @@ export function openSettings(afterChange) {
           s.theme = v; save(); applyTheme(); rerender();
         }}))),
 
-      el('h4', { text:'Model sozlamalari' }),
-      sliderRow('Ijodkorlik (temperature)', s.temperature, 0, 1.4, 0.1, v => { s.temperature = v; save(); }),
-      sliderRow('Eslab qoladigan xabarlar', s.historyLimit, 6, 60, 2, v => { s.historyLimit = v; save(); }),
-      sliderRow('Agent qadamlari (limit)', s.maxSteps, 4, 30, 1, v => { s.maxSteps = v; save(); }),
+      el('h4', { text:'Model' }),
+      sliderRow('Creativity (temperature)', s.temperature, 0, 1.4, 0.1, v => { s.temperature = v; save(); }),
+      sliderRow('Messages remembered', s.historyLimit, 6, 60, 2, v => { s.historyLimit = v; save(); }),
+      sliderRow('Agent step limit', s.maxSteps, 4, 60, 1, v => { s.maxSteps = v; save(); }),
 
       el('h4', { text:t('storage') }),
-      el('div', { class:'note', text:`${fmtBytes(storageBytes())} · ${state.chats.length} chat · ${state.apps.length} ilova` }),
+      el('div', { class:'note', text:`${fmtBytes(storageBytes())} · ${state.chats.length} chats · ${state.apps.length} apps` }),
       el('div', { class:'btn-row' },
         el('button', { class:'btn danger', text:t('clearAll'), onClick:async () => {
-          if (await confirmSheet({ title:t('clearAll'), text:'Barcha chat va ilovalar o\'chadi.', ok:t('delete') })) {
+          if (await confirmSheet({ title:t('clearAll'), text:'Every chat and app on this device is removed.', ok:t('delete') })) {
             for (const k of Object.keys(localStorage)) if (k.startsWith('mini.')) localStorage.removeItem(k);
             location.reload();
           }
         }})),
 
       el('div', { class:'note', style:{ marginTop:'18px' },
-        html:'<b>Mini</b> — ochiq kodli. Ma\'lumotlaringiz shu qurilmadan chiqmaydi; so\'rovlar to\'g\'ridan-to\'g\'ri siz tanlagan API ga ketadi.' }),
+        html:'<b>Mini</b> is open source. Your chats and apps never leave this device; requests go straight to the API you chose.' }),
     ];
   });
 }
@@ -185,7 +179,7 @@ export function openRolePicker(chat, onPick) {
     }},
       el('span', { class:'em', text:r.emoji }),
       el('span', { class:'txt' },
-        el('b', { text: typeof r.name === 'object' ? (r.name[currentLang()] || r.name.uz) : r.name }),
+        el('b', { text: r.name }),
         el('small', { text: r.tools ? t('roleToolsSub') : (r.prompt || '').slice(0, 44) })),
       r.id === chat.roleId ? svg(ICON.check, 'class="tick"') : null)),
     el('button', { class:'list-item', onClick:() => openRoleEditor(null, () => openRolePicker(chat, onPick)) },
@@ -198,11 +192,11 @@ export function openRoleEditor(role, after) {
   const isNew = !role;
   const draft = isNew
     ? { id:uid(), emoji:'✨', name:'', prompt:'', tools:false }
-    : { ...role, name: typeof role.name === 'object' ? (role.name[currentLang()] || role.name.uz) : role.name };
+    : { ...role };
 
   openSheet(() => {
     const name = el('input', { value:draft.name, placeholder:t('roleName') });
-    const prompt = el('textarea', { placeholder:'Masalan: Sen qisqa va hazil bilan javob beradigan yordamchisan.' });
+    const prompt = el('textarea', { placeholder:'For example: answer briefly, with a dry sense of humour.' });
     prompt.value = draft.prompt || '';
     prompt.disabled = !!role?.builtin && role.id === 'builder';
 
@@ -217,7 +211,7 @@ export function openRoleEditor(role, after) {
     return [
       el('h3', { text: isNew ? t('newRole') : draft.name }),
       role?.builtin
-        ? el('div', { class:'note', text:'Tayyor rol. Ko\'rsatmani o\'zgartirsangiz o\'zingiznikiga aylanadi.' })
+        ? el('div', { class:'note', text:'A built-in role. Editing it saves a copy of your own.' })
         : null,
       field(t('roleName'), name),
       field(t('icon'), emojiPick),
@@ -234,7 +228,7 @@ export function openRoleEditor(role, after) {
             }})
           : null,
         el('button', { class:'btn primary', text:t('save'), onClick:() => {
-            draft.name = name.value.trim() || 'Rol';
+            draft.name = name.value.trim() || 'Role';
             draft.prompt = prompt.value;
             if (role?.builtin) {                    // fork rather than mutate
               const copy = { ...draft, id:uid(), builtin:false };
@@ -315,12 +309,14 @@ export function openCode(files) {
 }
 
 /** `draft` = not published yet, so there is nothing to share, pin or delete. */
-export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, draft = false } = {}) {
+export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint, draft = false } = {}) {
   if (draft) return openSheet(() => [
     el('div', { class:'center', style:{ padding:'4px 0 14px' } },
       el('div', { class:'app-ico', style:{ background:app.color || '#7c8cff', margin:'0 auto' },
         text:app.emoji || '📱' }),
       el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name || 'Ilova' })),
+    el('button', { class:'list-item', onClick:() => { closeSheet(); onPrint?.(); } },
+      el('span', { class:'em', text:'🖨' }), el('span', { class:'txt' }, el('b', { text:t('print') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
       el('span', { class:'em', text:'{ }' }), el('span', { class:'txt' }, el('b', { text:t('code') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
@@ -340,6 +336,8 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, draft = 
       el('span', { class:'em', text:'✏️' }), el('span', { class:'txt' }, el('b', { text:t('edit') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openAddToHome(app); } },
       el('span', { class:'em', text:'📲' }), el('span', { class:'txt' }, el('b', { text:t('addToHome') }))),
+    el('button', { class:'list-item', onClick:() => { closeSheet(); onPrint?.(); } },
+      el('span', { class:'em', text:'🖨' }), el('span', { class:'txt' }, el('b', { text:t('print') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
       el('span', { class:'em', text:'{ }' }), el('span', { class:'txt' }, el('b', { text:t('code') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
@@ -381,8 +379,8 @@ export function openAddToHome(app) {
         }}));
       } else {
         box.append(el('div', { class:'note', html: ios
-          ? `Safari'da pastdagi <b>Ulashish</b> tugmasini bosing → <b>«Bosh ekranga qo'shish»</b>. Ilova <b>${app.name}</b> nomi va belgisi bilan qo'shiladi.`
-          : `Brauzer menyusidan <b>«Bosh ekranga qo'shish»</b> ni tanlang.` }));
+          ? `In Safari, tap <b>Share</b> → <b>Add to Home Screen</b>. It is added as <b>${app.name}</b> with its own icon.`
+          : `Choose <b>Add to Home screen</b> from the browser menu.` }));
       }
     })();
     return [
@@ -392,7 +390,7 @@ export function openAddToHome(app) {
           style:{ borderRadius:'16px' } })),
       box,
       el('div', { class:'note', style:{ marginTop:'12px' },
-        text:'Qo\'shilgach ilova alohida belgi bilan to\'liq ekranda ochiladi.' }),
+        text:'Once added, it opens full screen with its own icon.' }),
     ];
   });
 }

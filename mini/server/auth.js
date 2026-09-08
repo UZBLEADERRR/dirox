@@ -25,7 +25,7 @@ const DAY = 86_400_000;
 const REGS_PER_HOUR = Number(process.env.MINI_REGS_PER_HOUR || 10);
 
 const WEAK = new Set(['123456', '12345678', '123456789', 'password', 'parol', 'qwerty',
-  'qwerty123', '111111', '000000', 'iloveyou', 'admin1', 'abc123', 'parol123']);
+  'qwerty123', '111111', '000000', 'iloveyou', 'admin1', 'abc123', 'password1']);
 
 export const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
@@ -119,12 +119,12 @@ export class Auth {
     username = String(username || '').trim().toLowerCase();
     password = String(password || '');
 
-    if (name.length < 2) return { error: 'Ismingizni yozing (kamida 2 harf)' };
+    if (name.length < 2) return { error: 'Enter your name (at least 2 characters)' };
     if (!USERNAME_RE.test(username))
-      return { error: 'Username 3–20 ta kichik harf, raqam yoki _ bo\'lsin' };
-    if (this.byName.has(username)) return { error: 'Bu username band' };
-    if (password.length < 6) return { error: 'Parol kamida 6 belgi bo\'lsin' };
-    if (WEAK.has(password.toLowerCase())) return { error: 'Bu parol juda oddiy' };
+      return { error: 'Username: 3-20 lowercase letters, digits or _' };
+    if (this.byName.has(username)) return { error: 'That username is taken' };
+    if (password.length < 6) return { error: 'Password must be at least 6 characters' };
+    if (WEAK.has(password.toLowerCase())) return { error: 'That password is too common' };
 
     const salt = crypto.randomBytes(16).toString('base64');
     const user = {
@@ -149,7 +149,7 @@ export class Auth {
     const okPass = user ? this.#verify(user, String(password || '')) : this.#burn(password);
     if (!user || user.banned || !okPass) {
       this.#fail(ip);
-      return { error: 'Username yoki parol noto\'g\'ri' };
+      return { error: 'Wrong username or password' };
     }
     this.attempts.delete(ip);
     user.lastSeen = Date.now();
@@ -158,9 +158,9 @@ export class Auth {
   }
 
   changePassword(user, { current, next }) {
-    if (!this.#verify(user, String(current || ''))) return { error: 'Joriy parol noto\'g\'ri' };
-    if (String(next || '').length < 6) return { error: 'Yangi parol kamida 6 belgi bo\'lsin' };
-    if (WEAK.has(String(next).toLowerCase())) return { error: 'Bu parol juda oddiy' };
+    if (!this.#verify(user, String(current || ''))) return { error: 'Current password is wrong' };
+    if (String(next || '').length < 6) return { error: 'The new password must be at least 6 characters' };
+    if (WEAK.has(String(next).toLowerCase())) return { error: 'That password is too common' };
     user.salt = crypto.randomBytes(16).toString('base64');
     user.hash = this.#hash(next, user.salt);
     user.pv = (user.pv || 0) + 1;              // every older session dies here
@@ -183,7 +183,7 @@ export class Auth {
   #throttle(ip) {
     const a = this.attempts.get(ip);
     if (a && a.until > Date.now())
-      return `Juda ko'p urinish. ${Math.ceil((a.until - Date.now()) / 1000)} soniyadan keyin urining.`;
+      return `Too many attempts. Try again in ${Math.ceil((a.until - Date.now()) / 1000)}s.`;
     return null;
   }
 
@@ -200,7 +200,7 @@ export class Auth {
     const hour = Math.floor(Date.now() / 3600_000);
     const r = this.regs.get(ip);
     const n = r && r.hour === hour ? r.n : 0;
-    if (n >= REGS_PER_HOUR) return 'Bu tarmoqdan juda ko\'p ro\'yxatdan o\'tish. Bir soatdan keyin urining.';
+    if (n >= REGS_PER_HOUR) return 'Too many sign-ups from this network. Try again in an hour.';
     this.regs.set(ip, { hour, n: n + 1 });
     if (this.regs.size > 5000) {                // never let the map grow forever
       for (const [k, v] of this.regs) if (v.hour !== hour) this.regs.delete(k);

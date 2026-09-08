@@ -1,7 +1,7 @@
 /** Boot, routing, and the handful of global listeners the app needs. */
 
 import { state, save, activeChat, newChat, setQuotaHandler, getApp } from './store.js';
-import { setLang, t } from './i18n.js';
+import { t } from './i18n.js';
 import { applyTheme, openSettings, openRolePicker } from './ui/sheets.js';
 import { initChat, renderChat, send, stop, attachFiles, addPending } from './ui/chat.js';
 import { initApps, renderApps, openApp, closeApp } from './ui/apps.js';
@@ -16,11 +16,10 @@ const standalone = matchMedia('(display-mode: standalone)').matches || navigator
 
 /* ------------------------------------------------------------------ boot */
 
-setLang(state.settings.lang);
 applyTheme();
 window.__miniRender = () => { renderChat(); renderDrawer(); };
 
-setQuotaHandler(() => toast('Xotira to\'ldi. Eski chatlarni o\'chiring.', 4000));
+setQuotaHandler(() => toast('Storage is full. Delete some old chats.', 4000));
 
 initChat({ openApp: (draft) => openApp(draft) });
 initMarket({
@@ -192,8 +191,8 @@ if (!standalone && !deepAppId && !state.settings.installDismissed) {
             openSheet(() => [
               el('h3', { text:t('installPwa') }),
               el('div', { class:'note', html: ios
-                ? `Safari'da pastdagi <b>Ulashish</b> tugmasini bosing → <b>«Bosh ekranga qo'shish»</b>.`
-                : `Brauzer menyusidan <b>«Ilovani o'rnatish»</b> ni tanlang.` }),
+                ? `In Safari, tap <b>Share</b> → <b>Add to Home Screen</b>.`
+                : `Choose <b>Install app</b> from the browser menu.` }),
             ]);
           }
           state.settings.installDismissed = true; save(true);

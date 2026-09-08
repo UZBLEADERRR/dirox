@@ -54,15 +54,15 @@ export const remoteQuota = () => api('/api/market/quota').catch(() => null);
 
 /* ------------------------------------------------------------ publishing */
 
-const REVIEW_PROMPT = `Sen ilovalar do'koni moderatorisan. Foydalanuvchi yasagan mini ilovani ko'rib chiqasan.
+const REVIEW_PROMPT = `You are the moderator of an app store. You are reviewing a mini app someone built.
 
-QABUL QIL, agar ilova: ishlaydigan, tugallangan va biror foydali yoki qiziqarli ish qilsa (o'yin, asbob, kalkulyator, trekker, ta'lim va h.k.).
-RAD ET, agar ilova: bo'sh yoki namuna ("Salom dunyo"), tugallanmagan, buzilgan, takrorlanuvchi axlat, reklama/spam, kattalar uchun, zo'ravonlik, nafrat, firibgarlik yoki boshqa birovning shaxsiy ma'lumotini so'raydigan bo'lsa.
+ACCEPT if the app works, is finished, and does something useful or genuinely fun — a game, a tool, a calculator, a tracker, a course, a book, a reference.
+REJECT if it is empty or a template ("hello world"), unfinished, broken, repetitive filler, advertising or spam, adult, violent, hateful, a scam, or asks for someone else's personal data.
 
-Kategoriyani mavjudlaridan tanla. Hech biri to'g'ri kelmasa — yangi, qisqa va umumiy kategoriya o'ylab top (masalan "O'yinlar", "Asboblar", "Sog'liq", "Ta'lim", "Moliya", "Ijod").
+Pick a category from the existing ones. If none fits, invent a short, general one (for example "Games", "Tools", "Health", "Learning", "Finance", "Reading").
 
-FAQAT JSON qaytar, boshqa hech narsa:
-{"ok":true|false,"score":1-5,"note":"qisqa sabab","summary":"1 jumlada ilova nima qiladi","category":"slug-lotin-harflarda","categoryName":"Ko'rinadigan nom","categoryIcon":"bitta emoji","tags":["2-4 ta teg"]}`;
+Reply with JSON and nothing else:
+{"ok":true|false,"score":1-5,"note":"one short reason","summary":"one sentence saying what it does","category":"slug-in-latin-letters","categoryName":"Display name","categoryIcon":"one emoji","tags":["2-4 tags"]}`;
 
 /**
  * Runs the store review with the user's own model.
@@ -77,13 +77,13 @@ export async function reviewApp(project, meta, categories = []) {
 
   const catList = categories.length
     ? categories.map(c => `${c.id} (${c.name})`).join(', ')
-    : '(hali kategoriya yo\'q)';
+    : '(no categories yet)';
 
   const messages = [
     { role:'system', content: REVIEW_PROMPT },
     { role:'user', content:
-      `Mavjud kategoriyalar: ${catList}\n\nIlova nomi: ${meta.name}\nBelgisi: ${meta.emoji}\n` +
-      `Hajmi: ${Math.round(html.length / 1024)} KB\n\nKodi:\n${code}` },
+      `Existing categories: ${catList}\n\nName: ${meta.name}\nIcon: ${meta.emoji}\n` +
+      `Size: ${Math.round(html.length / 1024)} KB\n\nCode:\n${code}` },
   ];
 
   let out = '';
@@ -92,7 +92,7 @@ export async function reviewApp(project, meta, categories = []) {
   }
 
   const match = out.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('Tekshiruv javobi tushunarsiz');
+  if (!match) throw new Error('The review reply could not be read');
   const r = JSON.parse(match[0]);
 
   return {
@@ -100,8 +100,8 @@ export async function reviewApp(project, meta, categories = []) {
     score: Number(r.score) || 0,
     note: String(r.note || ''),
     summary: String(r.summary || ''),
-    category: String(r.category || 'boshqa').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 24),
-    categoryName: String(r.categoryName || r.category || 'Boshqa').slice(0, 24),
+    category: String(r.category || 'other').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 24),
+    categoryName: String(r.categoryName || r.category || 'Other').slice(0, 24),
     categoryIcon: String(r.categoryIcon || '📦').slice(0, 4),
     tags: Array.isArray(r.tags) ? r.tags.map(String).slice(0, 4) : [],
     model: s.model,

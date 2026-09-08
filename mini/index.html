@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Mini</title>
-<meta name="description" content="O'zingizga ilova yasang. AI yozadi, tekshiradi va telefon ekraningizga qo'yadi.">
+<meta name="description" content="Build your own apps, courses and books. The AI writes them, tests them, and puts them on your phone.">
 <meta name="theme-color" content="#0A0A0B">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mini">
 <meta property="og:title" content="Mini">
-<meta property="og:description" content="O'zingizga ilova yasang. Bir bosishda ekraningizga.">
+<meta property="og:description" content="Apps, courses and books — built by AI, on your home screen.">
 <meta property="og:image" content="assets/og.png">
 <link rel="manifest" href="manifest.webmanifest" id="manifest-link">
 <link rel="icon" href="assets/icon-192.png" type="image/png">
@@ -28,30 +28,30 @@
   <div class="auth-inner">
     <img class="auth-mark" src="assets/mark.png" alt="Mini">
     <h1 class="auth-title">Mini</h1>
-    <p class="auth-sub" id="auth-sub">O'zingizga ilova yasang. Bir bosishda ekraningizga.</p>
+    <p class="auth-sub" id="auth-sub">Build apps, courses and books. On your phone.</p>
 
     <div class="seg" id="auth-tabs" style="margin-bottom:18px">
-      <button data-mode="login" class="on" id="auth-tab-login">Kirish</button>
-      <button data-mode="register" id="auth-tab-register">Ro'yxatdan o'tish</button>
+      <button data-mode="login" class="on" id="auth-tab-login">Sign in</button>
+      <button data-mode="register" id="auth-tab-register">Create account</button>
     </div>
 
     <form id="auth-form" autocomplete="on">
       <div class="field" id="field-name" hidden>
-        <label for="auth-name">Ismingiz</label>
-        <input id="auth-name" name="name" autocomplete="name" maxlength="24" placeholder="Sarvarbek">
+        <label for="auth-name">Your name</label>
+        <input id="auth-name" name="name" autocomplete="name" maxlength="24" placeholder="Alex">
       </div>
       <div class="field">
         <label for="auth-username">Username</label>
         <input id="auth-username" name="username" autocomplete="username" autocapitalize="off"
-               spellcheck="false" maxlength="20" placeholder="sarvarbek">
+               spellcheck="false" maxlength="20" placeholder="alex">
       </div>
       <div class="field">
-        <label for="auth-password">Parol</label>
+        <label for="auth-password">Password</label>
         <input id="auth-password" name="password" type="password" autocomplete="current-password"
                minlength="6" placeholder="••••••">
       </div>
       <div class="note warn" id="auth-error" hidden></div>
-      <button class="btn primary" id="auth-submit" type="submit" style="margin-top:6px">Kirish</button>
+      <button class="btn primary" id="auth-submit" type="submit" style="margin-top:6px">Sign in</button>
     </form>
 
     <p class="auth-fine" id="auth-fine"></p>
@@ -60,7 +60,7 @@
 
 <!-- ====================== TOP BAR ====================== -->
 <header class="topbar" id="topbar" hidden>
-  <button class="icon-btn" id="btn-menu" aria-label="Menyu">
+  <button class="icon-btn" id="btn-menu" aria-label="Menu">
     <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
   </button>
 
@@ -70,7 +70,7 @@
     <button data-tab="market" id="tab-market">Market</button>
   </div>
 
-  <button class="icon-btn" id="btn-apps" aria-label="Ilovalarim">
+  <button class="icon-btn" id="btn-apps" aria-label="My apps">
     <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
   </button>
 </header>
@@ -83,24 +83,26 @@
 <form class="composer" id="composer" hidden>
   <div class="composer-inner">
     <div class="attachments" id="attachments" hidden></div>
+    <div class="source-chip" id="source-chip" hidden></div>
     <button type="button" class="role-pill" id="btn-role">
-      <span id="role-emoji">🧩</span><b id="role-name">Ilova yasovchi</b>
+      <span id="role-emoji">🧩</span><b id="role-name">App builder</b>
       <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
     <div class="composer-row">
-      <button type="button" class="icon-btn ghost" id="btn-attach" aria-label="Rasm">
+      <button type="button" class="icon-btn ghost" id="btn-attach" aria-label="Attach">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
-      <textarea id="input" rows="1" placeholder="Nima yasaymiz?" enterkeyhint="send"></textarea>
-      <button type="submit" class="send-btn" id="btn-send" aria-label="Yuborish">
+      <textarea id="input" rows="1" placeholder="What are we building?" enterkeyhint="send"></textarea>
+      <button type="submit" class="send-btn" id="btn-send" aria-label="Send">
         <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg>
       </button>
-      <button type="button" class="send-btn stop" id="btn-stop" hidden aria-label="To'xtatish">
+      <button type="button" class="send-btn stop" id="btn-stop" hidden aria-label="Stop">
         <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>
       </button>
     </div>
   </div>
-  <input type="file" id="file-input" accept="image/*" multiple hidden>
+  <input type="file" id="file-input"
+         accept="image/*,.pdf,.epub,.txt,.md,.markdown,.html,.htm,text/plain,application/pdf" multiple hidden>
 </form>
 
 <!-- ====================== MARKET ====================== -->
@@ -109,7 +111,7 @@
     <div class="search-wrap">
       <div class="search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        <input id="market-search" type="search" placeholder="Ilova qidirish…" enterkeyhint="search">
+        <input id="market-search" type="search" placeholder="Search apps…" enterkeyhint="search">
       </div>
     </div>
     <div class="cats" id="market-cats"></div>
@@ -120,10 +122,10 @@
 <!-- ====================== MY APPS ====================== -->
 <section class="screen" id="apps-screen" hidden>
   <header class="topbar">
-    <button class="icon-btn" id="btn-apps-back" aria-label="Orqaga">
+    <button class="icon-btn" id="btn-apps-back" aria-label="Back">
       <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
     </button>
-    <div style="flex:1;text-align:center;font-weight:600;font-size:15.5px" id="apps-title">Ilovalarim</div>
+    <div style="flex:1;text-align:center;font-weight:600;font-size:15.5px" id="apps-title">My apps</div>
     <span class="icon-btn" style="visibility:hidden"></span>
   </header>
   <div class="apps-grid" id="apps-grid"></div>
@@ -136,7 +138,7 @@
   <div class="drawer-head">
     <button class="new-chat" id="btn-new-chat">
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-      <span id="t-new-chat">Yangi chat</span>
+      <span id="t-new-chat">New chat</span>
     </button>
   </div>
   <div class="chat-list" id="chat-list"></div>
@@ -147,7 +149,7 @@
     </button>
     <button class="drawer-item" id="btn-settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M4 12h2m12 0h2M12 4v2m0 12v2M6.6 6.6l1.4 1.4m8 8l1.4 1.4m0-10.8l-1.4 1.4m-8 8l-1.4 1.4"/></svg>
-      <span id="t-settings">Sozlamalar</span>
+      <span id="t-settings">Settings</span>
     </button>
     <div class="usage" id="usage"></div>
   </div>
@@ -165,11 +167,11 @@
 <!-- ====================== PLAYER ====================== -->
 <div class="player" id="player" hidden>
   <div class="player-bar" id="player-bar">
-    <button class="icon-btn" id="btn-player-close" aria-label="Yopish">
+    <button class="icon-btn" id="btn-player-close" aria-label="Close">
       <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
     <div class="player-name" id="player-name"></div>
-    <button class="icon-btn" id="btn-player-menu" aria-label="Menyu">
+    <button class="icon-btn" id="btn-player-menu" aria-label="Menu">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>
     </button>
   </div>
