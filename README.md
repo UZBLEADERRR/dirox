@@ -16,21 +16,23 @@ boundaries, a budget and an audit trail.
 ## Also in this repository: `mini/`
 
 **[Mini](mini/README.md)** — a separate, much smaller product that shares
-nothing with the server above. It is a mobile-first PWA where you bring your own
-API key, pick any model, and ask for a small app; the agent writes it, runs it
-in a sandbox, reads back its own errors, fixes them, and pins the finished app
-to your phone's home screen with its own name and icon. Publish it to the
-built-in **Market** and the AI reviews and categorises it; anyone installs it in
-one tap, one publish per person per day.
+nothing with the server above. Sign up with a name, a username and a password,
+bring your own API key, pick any model, and ask for a small app; the agent
+writes it, runs it in a sandbox, reads back its own errors, fixes them, and
+pins the finished app to your phone's home screen with its own name and icon.
+Publish it to the built-in **Market** and the AI reviews and categorises it;
+anyone installs it in one tap, one publish per person per day. An account
+unused for 30 days is deleted; the apps it published stay.
 
 Chats and apps live in `localStorage`; the only server is a zero-dependency
-Node process for the market, built so the origin barely does any work — one
-gzipped, ETagged catalogue file, immutable content-hashed app bundles, and
-review that runs on the submitter's own model.
+Node process for accounts and the market, built so the origin barely does any
+work — stateless session tokens, one gzipped and ETagged catalogue file,
+immutable content-hashed app bundles, and review that runs on the submitter's
+own model.
 
 ```bash
 cd mini && npm start     # app + market on :8080
-npm test                 # 55 checks in a real Chromium
+npm test                 # 83 checks in a real Chromium
 ```
 
 ---

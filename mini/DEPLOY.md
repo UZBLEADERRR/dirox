@@ -50,6 +50,9 @@ Servis → **Variables**:
 | `MINI_MODERATE` | `1` | ilovalar sizning tasdig'ingizni kutadi |
 | `MINI_MAX_PER_DAY` | `1` | bir qurilmadan kuniga nechta ilova |
 | `MINI_MAX_PER_IP` | `20` | bir IP dan kuniga nechta (operator NAT uchun) |
+| `MINI_INACTIVE_DAYS` | `30` | necha kun jimlikdan keyin akkaunt o'chadi |
+| `MINI_SECRET` | uzun tasodifiy satr | sessiya imzo kaliti — pastdagi izohni o'qing |
+| `MINI_REGS_PER_HOUR` | `10` | bir IP dan soatiga nechta ro'yxatdan o'tish |
 
 `PORT` ni **qo'ymang** — Railway o'zi beradi, server o'zi o'qiydi.
 
@@ -58,6 +61,12 @@ Token yasash:
 ```bash
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 ```
+
+**`MINI_SECRET` haqida.** Qo'ymasangiz, server uni birinchi ishga tushganda
+o'zi yasab, `/data/secret` fayliga yozadi — volume bo'lsa bu yetarli va
+xavfsiz. Qo'lda qo'yishning yagona sababi: bir nechta nusxa (replica)
+ishlatmoqchi bo'lsangiz, hammasida bir xil bo'lishi kerak. Kalit o'zgarsa —
+hamma foydalanuvchi tizimdan chiqib ketadi (parollari saqlanib qoladi).
 
 ## 5. Domen
 
@@ -75,12 +84,25 @@ curl https://SIZNING-DOMEN/api/health
 # {"ok":true,"apps":0,"moderate":false,"uptime":12}
 ```
 
-Telefonda oching → API kalitingizni kiriting → ilova yasang → **Marketga
-joylash**. Katalogni ko'rish:
+Telefonda oching → ro'yxatdan o'ting (ism, username, parol) → API
+kalitingizni kiriting → ilova yasang → **Marketga joylash**. Katalogni
+ko'rish:
 
 ```bash
 curl https://SIZNING-DOMEN/api/market/index.json
 ```
+
+---
+
+## Akkauntlar
+
+Ro'yxatdan o'tish ochiq: ism, username, parol. Email so'ralmaydi, shuning
+uchun parolni tiklash ham yo'q — bu foydalanuvchiga kirish ekranida
+aytiladi.
+
+**30 kun kirilmagan akkaunt avtomatik o'chiriladi.** Server buni har soatda
+tekshiradi. Marketga joylangan ilovalar qoladi — ularni odamlar o'rnatgan.
+Muddatni `MINI_INACTIVE_DAYS` bilan o'zgartirasiz.
 
 ---
 
@@ -93,6 +115,8 @@ sizning tasdig'ingizni kutadi.
 TOKEN=...; HOST=https://SIZNING-DOMEN
 
 curl -H "X-Admin-Token: $TOKEN" $HOST/api/admin/pending
+curl -H "X-Admin-Token: $TOKEN" $HOST/api/admin/users
+curl -X POST -H "X-Admin-Token: $TOKEN" $HOST/api/admin/sweep    # faolsizlarni darrov o'chirish
 curl -X POST -H "X-Admin-Token: $TOKEN" "$HOST/api/admin/publish?id=<id>"
 curl -X POST -H "X-Admin-Token: $TOKEN" "$HOST/api/admin/remove?id=<id>"
 ```
@@ -106,11 +130,16 @@ curl -X POST -H "X-Admin-Token: $TOKEN" "$HOST/api/admin/remove?id=<id>"
 Hamma narsa `/data` ichidagi oddiy JSON fayllarda:
 
 ```
+/data/users.json       akkauntlar (parollar scrypt bilan xeshlangan)
+/data/secret           sessiya imzo kaliti
 /data/apps.json        katalog
 /data/apps/<id>.json   ilovalarning o'zi
 /data/installs.json    o'rnatish sanoqlari
-/data/limits.json      kunlik chegara hisobi
+/data/limits.json      IP bo'yicha kunlik hisob
 ```
+
+`users.json` va `secret` — eng muhim ikkitasi. `secret` yo'qolsa hamma qayta
+kirishi kerak bo'ladi; `users.json` yo'qolsa akkauntlar yo'qoladi.
 
 Railway CLI orqali:
 

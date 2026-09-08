@@ -1,9 +1,10 @@
 /** The market screen: browse, install, and publish what you built. */
 
-import { state, save, publishApp, getApp } from '../store.js';
+import { state, publishApp } from '../store.js';
+import { session, signedIn, refresh } from '../auth.js';
 import { t } from '../i18n.js';
 import * as api from '../market.js';
-import { $, el, svg, ICON, openSheet, closeSheet, toast, field, confirmSheet } from './dom.js';
+import { $, el, svg, ICON, openSheet, closeSheet, toast } from './dom.js';
 import { openAddToHome } from './sheets.js';
 
 let cat = null, query = '', data = null, loading = false, hooks = {};
@@ -114,7 +115,7 @@ export async function openDetail(a) {
         width:'76px', height:'76px', borderRadius:'21px', fontSize:'38px' }, text:a.emoji || '📦' }),
       el('h3', { class:'center', style:{ marginBottom:'2px' }, text:a.name }),
       el('div', { style:{ color:'var(--muted)', fontSize:'13px' },
-        text:`${a.catName || ''} · ${a.author || 'anonim'}` })),
+        text:`${a.catName || ''} · ${a.author || 'anonim'}${a.authorUsername ? ' @' + a.authorUsername : ''}` })),
 
     a.summary ? el('p', { class:'note', style:{ marginTop:'14px' }, text:a.summary }) : null,
 
@@ -212,12 +213,13 @@ export async function openSharedApp(id) {
  * model — the same key they build with — so the store costs its host nothing
  * to police.
  */
-export function openPublishToMarket(project, meta) {
+export async function openPublishToMarket(project, meta) {
   const s = state.settings;
 
-  if (!s.apiKey || !s.model)
-    return toast(t('noKeyTitle'));
+  if (!signedIn()) return toast(t('loginToPublish'));
+  if (!s.apiKey || !s.model) return toast(t('noKeyTitle'));
 
+  await refresh();                         // the server owns the daily count
   if (api.publishedToday())
     return openSheet(() => [
       el('h3', { text:t('marketPublish') }),
@@ -225,12 +227,10 @@ export function openPublishToMarket(project, meta) {
     ]);
 
   openSheet(close => {
-    const author = el('input', { value:s.author || '', placeholder:'anonim', maxlength:'24' });
     const box = el('div');
     const go = el('button', { class:'btn primary', text:t('reviewStart') });
 
     go.onclick = async () => {
-      s.author = author.value.trim().slice(0, 24); save();
       go.disabled = true;
       box.innerHTML = '';
       box.append(el('div', { class:'note' },
@@ -263,7 +263,7 @@ export function openPublishToMarket(project, meta) {
       go.onclick = async () => {
         go.disabled = true;
         try {
-          const res = await api.publish({ project, meta, review, author: s.author || 'anonim' });
+          const res = await api.publish({ project, meta, review });
           api.markPublished();
           box.innerHTML = '';
           box.append(el('div', { class:'note ok',
@@ -281,8 +281,8 @@ export function openPublishToMarket(project, meta) {
     return [
       el('h3', { text:t('marketPublish') }),
       el('div', { class:'note', text:t('marketHow') }),
-      el('div', { style:{ height:'14px' } }),
-      field(t('author'), author, t('authorHint')),
+      el('div', { class:'note', style:{ marginTop:'10px' },
+        text:`${t('author')}: ${session.user?.name || ''} (@${session.user?.username || ''})` }),
       box,
       el('div', { class:'btn-row' }, go),
     ];

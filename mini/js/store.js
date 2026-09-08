@@ -43,15 +43,12 @@ const DEFAULTS = {
     maxSteps: 26,             // agent tool-loop budget
     installDismissed: false,
     marketUrl: '',            // '' = same origin as this page
-    author: '',               // shown next to published apps
   },
   roles: [],                  // user-made roles only; builtins are merged in
   chats: [],
   apps: [],
   activeChatId: null,
   totals: { in:0, out:0, cost:0 },
-  deviceId: '',               // anonymous, local: enforces one publish a day
-  lastPublish: '',            // YYYY-MM-DD
   tab: 'chat',
 };
 
@@ -164,6 +161,10 @@ export function appData(appId) {
 export function setAppData(appId, data) {
   try { localStorage.setItem(APPDATA + appId, JSON.stringify(data)); } catch {}
 }
+
+/** Where the market lives. Empty setting = the site this page came from. */
+export const marketBase = () =>
+  (state.settings.marketUrl || location.origin).replace(/\/+$/, '');
 
 /* ---------------- storage meter ---------------- */
 

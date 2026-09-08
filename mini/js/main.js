@@ -7,6 +7,8 @@ import { initChat, renderChat, send, stop, attachFiles, addPending } from './ui/
 import { initApps, renderApps, openApp, closeApp } from './ui/apps.js';
 import { initMarket, renderMarket, bindMarketControls, openSharedApp, openPublishToMarket } from './ui/market.js';
 import { openDrawer, closeDrawer, renderDrawer, startNewChat } from './ui/drawer.js';
+import { showAuth, hideAuth, bindAuth, openAccount } from './ui/auth.js';
+import { signedIn, refresh, displayName } from './auth.js';
 import { $, $$, el, toast, openSheet, closeSheet, sheetOpen, readImage,
          pushHistory as push, popHistory as back, notePop, resetHistory } from './ui/dom.js';
 
@@ -74,16 +76,33 @@ function showShell(tab = state.tab || 'chat') {
   setTab(tab);
 }
 
-if (deepAppId) {
-  const app = getApp(deepAppId);
-  if (app) { $('#boot').hidden = true; openApp(app, { bare:true }); resetHistory(); }
-  else { history.replaceState(null, '', location.pathname); showShell(); }
-} else if (deepMarket) {
-  history.replaceState(null, '', location.pathname);
-  showShell('market');
-  openSharedApp(deepMarket);
-} else {
+bindAuth();
+
+function start() {
+  if (deepAppId) {
+    const app = getApp(deepAppId);
+    if (app) { $('#boot').hidden = true; openApp(app, { bare:true }); resetHistory(); return; }
+    history.replaceState(null, '', location.pathname);
+    return showShell();
+  }
+  if (deepMarket) {
+    history.replaceState(null, '', location.pathname);
+    showShell('market');
+    return openSharedApp(deepMarket);
+  }
   showShell();
+}
+
+/* A home-screen mini app opens without an account: it is already installed
+   and runs entirely on this phone. Everything else waits for a sign-in. */
+if (signedIn() || deepAppId) {
+  start();
+  refresh().then(user => {
+    if (!user && !deepAppId) { hideAuth(); showAuth(() => location.reload()); }
+    else renderDrawer();
+  });
+} else {
+  showAuth(() => { start(); refresh().then(renderDrawer); });
 }
 
 /* --------------------------------------------------------------- screens */
@@ -113,6 +132,7 @@ $('#btn-menu').onclick = () => { openDrawer(); push(); };
 $('#scrim').onclick = () => { closeDrawer(); back(); };
 $('#btn-new-chat').onclick = () => { closeDrawer(); back(); startNewChat(); };
 $('#btn-settings').onclick = () => openSettings(() => window.__miniRender());
+$('#btn-account').onclick = () => openAccount(() => renderDrawer());
 $('#btn-apps').onclick = () => showApps(true);
 $('#btn-apps-back').onclick = () => { $('#apps-screen').hidden = true; back(); };
 $('#btn-role').onclick = () => openRolePicker(activeChat(), () => window.__miniRender());

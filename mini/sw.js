@@ -7,13 +7,14 @@
  * `i/<id>-192.png`) and this worker serves them back as if a server had.
  */
 
-const VERSION = 'mini-v2';
+const VERSION = 'mini-v3';
 const SHELL = [
   './', './index.html', './app.css', './manifest.webmanifest',
   './js/main.js', './js/store.js', './js/i18n.js', './js/llm.js', './js/agent.js',
   './js/tools.js', './js/sandbox.js', './js/md.js', './js/icons.js', './js/market.js',
+  './js/auth.js',
   './js/ui/dom.js', './js/ui/chat.js', './js/ui/drawer.js', './js/ui/sheets.js',
-  './js/ui/apps.js', './js/ui/market.js',
+  './js/ui/apps.js', './js/ui/market.js', './js/ui/auth.js',
   './assets/mark.png', './assets/icon-180.png', './assets/icon-192.png', './assets/icon-512.png',
 ];
 

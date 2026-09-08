@@ -62,12 +62,6 @@ export function openSettings(afterChange) {
         return field(t('marketUrl'), mk,
           'Bo\'sh qoldirsangiz shu saytning o\'zi ishlatiladi. O\'z serveringizni qo\'ysangiz — market o\'shandan o\'qiydi.');
       })(),
-      (() => {
-        const au = el('input', { value:s.author || '', placeholder:'anonim', maxlength:'24' });
-        au.addEventListener('input', () => { s.author = au.value.trim(); save(); });
-        return field(t('author'), au);
-      })(),
-
       el('h4', { text:t('roles') }),
       ...allRoles().map(r => el('button', { class:'list-item', onClick:() => openRoleEditor(r, rerender) },
         el('span', { class:'em', text:r.emoji }),
@@ -297,7 +291,7 @@ export function openPublish(project, existing, onDone) {
       el('div', { class:'btn-row' },
         el('button', { class:'btn primary', text:t('save'), onClick:() => {
           const app = publishApp({ ...draft, files:project.files, assets:project.assets });
-          closeSheet(); toast(t('published')); onDone?.(app);
+          closeSheet(); toast(t('appAdded')); onDone?.(app);
         }})),
     ];
   });

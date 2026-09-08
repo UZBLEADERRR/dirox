@@ -3,6 +3,7 @@
 import { state, save, deleteChat, newChat, getRole } from '../store.js';
 import { t } from '../i18n.js';
 import { $, el, openSheet, closeSheet, confirmSheet as ask, svg, ICON, field } from './dom.js';
+import { session } from '../auth.js';
 
 const DAY = 864e5;
 
@@ -21,6 +22,14 @@ export function renderDrawer(onPick) {
   list.innerHTML = '';
   $('#t-new-chat').textContent = t('newChat');
   $('#t-settings').textContent = t('settings');
+
+  const u = session.user;
+  $('#btn-account').hidden = !u;
+  if (u) {
+    $('#account-avatar').textContent = (u.name || u.username).slice(0, 1).toUpperCase();
+    $('#account-name').textContent = u.name || u.username;
+    $('#account-handle').textContent = '@' + u.username;
+  }
 
   const now = Date.now();
   const groups = [[t('today'), []], [t('week'), []], [t('older'), []]];

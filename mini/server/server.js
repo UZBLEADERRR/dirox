@@ -19,6 +19,9 @@
  *   MINI_MODERATE      "1" holds submissions for admin approval
  *   MINI_MAX_PER_DAY   publishes per device per day (1)
  *   MINI_MAX_PER_IP    publishes per address per day (20) — carrier NAT backstop
+ *   MINI_INACTIVE_DAYS days of silence before an account is deleted (30)
+ *   MINI_SECRET        session signing key (generated into MINI_DATA if unset)
+ *   MINI_REGS_PER_HOUR sign-ups allowed per address per hour (10)
  */
 
 import http from 'node:http';
@@ -28,6 +31,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { readJson, writeJson } from './store.js';
+import { Auth } from './auth.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = path.resolve(process.env.MINI_DATA || path.join(ROOT, 'data'));
@@ -39,6 +44,7 @@ const PER_DAY = Number(process.env.MINI_MAX_PER_DAY || 1);
 // Mobile carriers put whole cities behind one address, so the IP cap is only
 // an anti-flood backstop — the device id is what enforces "one a day".
 const PER_IP = Number(process.env.MINI_MAX_PER_IP || Math.max(20, PER_DAY * 20));
+const INACTIVE_DAYS = Number(process.env.MINI_INACTIVE_DAYS || 30);
 
 const LIMITS = {
   bundle: 400 * 1024,      // total size of one app
@@ -54,14 +60,7 @@ const LIMITS = {
 
 for (const dir of [DATA, APPS]) fs.mkdirSync(dir, { recursive: true });
 
-const readJson = (file, fallback) => {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-};
-const writeJson = (file, value) => {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(value));
-  fs.renameSync(tmp, file);                // atomic: readers never see a half file
-};
+const auth = new Auth(DATA, { inactiveDays: INACTIVE_DAYS, secret: process.env.MINI_SECRET });
 
 const state = {
   apps: readJson(path.join(DATA, 'apps.json'), []),        // catalogue rows
@@ -85,7 +84,8 @@ function rebuild() {
     categories: [...cats.values()].sort((x, y) => y.count - x.count),
     apps: live
       .map(a => ({ id:a.id, name:a.name, emoji:a.emoji, color:a.color, cat:a.cat, catName:a.catName,
-                   summary:a.summary, author:a.author, tags:a.tags, size:a.size, v:a.v,
+                   summary:a.summary, author:a.author, authorUsername:a.authorUsername,
+                   tags:a.tags, size:a.size, v:a.v,
                    installs:(state.installs[a.id] || 0) + (a.installs || 0), createdAt:a.createdAt }))
       .sort((x, y) => y.installs - x.installs || y.createdAt - x.createdAt),
   };
@@ -139,7 +139,7 @@ const json = (res, code, obj, headers = {}) =>
 
 const CORS = {
   'Access-Control-Allow-Origin': process.env.MINI_CORS || '*',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Mini-Device, X-Admin-Token',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Mini-Device, X-Admin-Token',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Max-Age': '86400',
 };
@@ -149,6 +149,8 @@ function clientIp(req) {
   return (Array.isArray(fwd) ? fwd[0] : fwd || '').split(',')[0].trim()
     || req.socket.remoteAddress || '0.0.0.0';
 }
+
+const bearer = req => auth.verify((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
 
 async function readBody(req) {
   let size = 0;
@@ -224,6 +226,7 @@ const server = http.createServer(async (req, res) => {
       ok: true, apps: state.apps.filter(a => a.status === 'live').length,
       moderate: MODERATE, uptime: Math.round(process.uptime()),
     }, { ...CORS, 'Cache-Control': 'no-store' });
+    if (p.startsWith('/api/auth/')) return authRoute(req, res, p.slice(10));
     if (p === '/api/market/index.json') return marketIndex(req, res);
     if (p.startsWith('/api/market/app/')) return marketApp(req, res, p.slice(16).replace(/\.json$/, ''));
     if (p === '/api/market/submit' && req.method === 'POST') return submit(req, res);
@@ -238,6 +241,53 @@ const server = http.createServer(async (req, res) => {
     console.error(e);
   }
 });
+
+/* ---------------------------------------------------------------- auth */
+
+async function authRoute(req, res, action) {
+  const ip = clientIp(req);
+
+  if (action === 'register' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    const r = auth.register({ ...body, ip });
+    if (r.error) return json(res, 400, { error: r.error }, CORS);
+    return json(res, 200, { token: auth.issue(r.user), user: auth.publicUser(r.user) },
+                { ...CORS, 'Cache-Control': 'no-store' });
+  }
+
+  if (action === 'login' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    const r = auth.login({ ...body, ip });
+    if (r.error) return json(res, 401, { error: r.error }, CORS);
+    return json(res, 200, { token: auth.issue(r.user), user: auth.publicUser(r.user) },
+                { ...CORS, 'Cache-Control': 'no-store' });
+  }
+
+  const user = bearer(req);
+  if (!user) return json(res, 401, { error: 'kirish kerak' }, { ...CORS, 'Cache-Control': 'no-store' });
+
+  if (action === 'me' && req.method === 'GET') {
+    const { used } = quotaState(user);
+    return json(res, 200, {
+      user: auth.publicUser(user),
+      quota: { perDay: PER_DAY, used, left: Math.max(0, PER_DAY - used) },
+    }, { ...CORS, 'Cache-Control': 'no-store' });
+  }
+
+  if (action === 'password' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    const r = auth.changePassword(user, body);
+    if (r.error) return json(res, 400, { error: r.error }, CORS);
+    return json(res, 200, { token: auth.issue(user) }, { ...CORS, 'Cache-Control': 'no-store' });
+  }
+
+  if (action === 'me' && req.method === 'DELETE') {
+    auth.remove(user.id);
+    return json(res, 200, { ok: true }, CORS);
+  }
+
+  json(res, 404, { error: 'not found' }, CORS);
+}
 
 /* ------------------------------------------------------------ handlers */
 
@@ -268,27 +318,33 @@ function marketApp(req, res, id) {
   fs.createReadStream(file).pipe(res);
 }
 
-function quotaKeyState(device, ip) {
+/** One publish a day, counted against the account rather than the browser. */
+function quotaState(user) {
   const day = today();
-  const dev = state.limits[device] || {};
+  return { day, used: user.publishDay === day ? (user.publishCount || 0) : 0 };
+}
+
+function ipState(ip) {
+  const day = today();
   const byIp = state.limits['ip:' + ip] || {};
-  return { day, used: dev.day === day ? dev.n : 0, ipUsed: byIp.day === day ? byIp.n : 0 };
+  return { day, ipUsed: byIp.day === day ? byIp.n : 0 };
 }
 
 function quota(req, res) {
-  const device = String(req.headers['x-mini-device'] || '').slice(0, 64);
-  const { used } = quotaKeyState(device, clientIp(req));
+  const user = bearer(req);
+  if (!user) return json(res, 401, { error: 'kirish kerak' }, { ...CORS, 'Cache-Control': 'no-store' });
+  const { used } = quotaState(user);
   json(res, 200, { perDay: PER_DAY, used, left: Math.max(0, PER_DAY - used) },
        { ...CORS, 'Cache-Control': 'no-store' });
 }
 
 async function submit(req, res) {
-  const device = String(req.headers['x-mini-device'] || '').slice(0, 64);
-  if (!/^[a-zA-Z0-9_-]{8,64}$/.test(device))
-    return json(res, 400, { error: 'qurilma aniqlanmadi' }, CORS);
+  const user = bearer(req);
+  if (!user) return json(res, 401, { error: 'Joylash uchun kiring' }, CORS);
 
   const ip = clientIp(req);
-  const { day, used, ipUsed } = quotaKeyState(device, ip);
+  const { day, used } = quotaState(user);
+  const { ipUsed } = ipState(ip);
   if (used >= PER_DAY || ipUsed >= PER_IP)
     return json(res, 429, { error: `Kuniga ${PER_DAY} ta ilova joylash mumkin. Ertaga urinib ko'ring.` }, CORS);
 
@@ -329,7 +385,9 @@ async function submit(req, res) {
     catIcon: String(review.categoryIcon || '📦').slice(0, 4),
     summary: String(review.summary || payload.summary || '').slice(0, LIMITS.summary),
     tags: (Array.isArray(review.tags) ? review.tags : []).slice(0, 5).map(t => String(t).slice(0, 18)),
-    author: String(payload.author || 'anonim').slice(0, 24),
+    author: user.name,
+    authorId: user.id,
+    authorUsername: user.username,
     size: v.size,
     v: hash,
     installs: 0,
@@ -338,12 +396,15 @@ async function submit(req, res) {
     review: { model: String(review.model || '').slice(0, 60), score: Number(review.score) || 0,
               note: String(review.note || '').slice(0, 300) },
     ip,
-    device,
   };
 
-  await fsp.writeFile(path.join(APPS, id + '.json'), JSON.stringify({ ...row, ...bundle, ip:undefined, device:undefined }));
+  await fsp.writeFile(path.join(APPS, id + '.json'),
+    JSON.stringify({ ...row, ...bundle, ip: undefined, authorId: undefined }));
   state.apps.unshift(row);
-  state.limits[device] = { day, n: used + 1 };
+  user.publishDay = day;
+  user.publishCount = used + 1;
+  user.apps = (user.apps || 0) + 1;
+  auth.flush();
   state.limits['ip:' + ip] = { day, n: ipUsed + 1 };
   writeJson(path.join(DATA, 'limits.json'), state.limits);
   persist();
@@ -357,14 +418,23 @@ function install(req, res, id) {
   send(res, 204, '', CORS);
 }
 
+const sameToken = (a, b) => {
+  const x = Buffer.from(String(a || '')), y = Buffer.from(String(b || ''));
+  return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y);
+};
+
 function admin(req, res, action, url) {
-  if (!ADMIN || req.headers['x-admin-token'] !== ADMIN)
+  if (!ADMIN || !sameToken(req.headers['x-admin-token'], ADMIN))
     return json(res, 403, { error: 'forbidden' }, CORS);
 
   if (action === 'pending')
     return json(res, 200, state.apps.filter(a => a.status !== 'live'), CORS);
   if (action === 'all')
     return json(res, 200, state.apps, CORS);
+  if (action === 'users')
+    return json(res, 200, auth.users.map(u => auth.publicUser(u)), CORS);
+  if (action === 'sweep')
+    return json(res, 200, { removed: auth.sweep() }, CORS);
 
   const id = url.searchParams.get('id');
   const row = state.apps.find(a => a.id === id);
@@ -416,8 +486,26 @@ function statik(req, res, p) {
   });
 }
 
+/**
+ * Accounts nobody has opened in a month are removed, checked hourly so a
+ * restarted process still gets to it. Published apps outlive their author.
+ */
+setInterval(() => {
+  const gone = auth.sweep();
+  if (gone.length) console.log(`${gone.length} ta faolsiz akkaunt o'chirildi`);
+
+  // Yesterday's per-address counters are dead weight; drop them.
+  const day = today();
+  let dropped = 0;
+  for (const k of Object.keys(state.limits)) {
+    if (state.limits[k]?.day !== day) { delete state.limits[k]; dropped++; }
+  }
+  if (dropped) writeJson(path.join(DATA, 'limits.json'), state.limits);
+}, 3600_000).unref();
+setTimeout(() => auth.sweep(), 10_000).unref();
+
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Mini ${PORT}-portda. Ma'lumot: ${DATA}` +
+  console.log(`Mini ${PORT}-portda. Ma'lumot: ${DATA} | ${auth.users.length} akkaunt` +
     (MODERATE ? ' | moderatsiya: yoqilgan' : '') + (ADMIN ? ' | admin: yoqilgan' : ''));
 });
 
@@ -431,6 +519,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
     if (closing) process.exit(0);
     closing = true;
     if (installsDirty) writeJson(path.join(DATA, 'installs.json'), state.installs);
+    auth.flush();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   });

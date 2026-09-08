@@ -8,24 +8,16 @@
  * publishing, not the person hosting.
  */
 
-import { state, save, uid } from './store.js';
+import { state, marketBase } from './store.js';
 import { stream } from './llm.js';
-
-export const marketBase = () =>
-  (state.settings.marketUrl || location.origin).replace(/\/+$/, '');
-
-/** A stable, anonymous id so "one publish a day" means something. */
-export function deviceId() {
-  if (!state.deviceId) { state.deviceId = uid() + uid(); save(true); }
-  return state.deviceId;
-}
+import { authHeaders, session } from './auth.js';
 
 const CACHE_KEY = 'mini.market.cache';
 
 async function api(path, opts = {}) {
   const res = await fetch(marketBase() + path, {
     ...opts,
-    headers: { 'X-Mini-Device': deviceId(), ...(opts.headers || {}) },
+    headers: { ...authHeaders(), ...(opts.headers || {}) },
   });
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
@@ -116,26 +108,26 @@ export async function reviewApp(project, meta, categories = []) {
   };
 }
 
-export function publish({ project, meta, review, author }) {
+export function publish({ project, meta, review }) {
   return api('/api/market/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: meta.name, emoji: meta.emoji, color: meta.color,
       files: project.files, assets: project.assets || [],
-      author, review,
+      review,
     }),
   });
 }
 
 /* --------------------------------------------------------------- local */
 
-export const publishedToday = () =>
-  state.lastPublish === new Date().toISOString().slice(0, 10);
+/** The server is the authority; this only saves a round trip before trying. */
+export const quotaLeft = () => session.quota?.left;
+export const publishedToday = () => session.quota?.left === 0;
 
 export function markPublished() {
-  state.lastPublish = new Date().toISOString().slice(0, 10);
-  save(true);
+  if (session.quota) session.quota.left = Math.max(0, session.quota.left - 1);
 }
 
 export const isInstalled = marketId => state.apps.some(a => a.marketId === marketId);

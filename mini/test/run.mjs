@@ -33,9 +33,20 @@ const group = name => console.log(`\n${name}`);
 
 const seed = (extra = {}) => ({
   settings: { lang:'uz', apiKey:'sk-mock', baseUrl:API, model:'mock/fast',
-              modelName:'Mock Fast', installDismissed:true, theme:'dark', author:'Tester' },
+              modelName:'Mock Fast', installDismissed:true, theme:'dark' },
   ...extra,
 });
+
+/** Creates an account straight through the API, for tests that are not about signing up. */
+async function makeAccount(name, username, password = 'olmaqogoz7') {
+  const res = await fetch(ORIGIN + '/api/auth/register', {
+    method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ name, username, password }),
+  });
+  const body = await res.json();
+  if (body.error) throw new Error('akkaunt yaratilmadi: ' + body.error);
+  return body;
+}
 
 const marketApi = (p, opts) => fetch(ORIGIN + p, opts).then(r => r.json());
 
@@ -51,12 +62,16 @@ async function buildApp(page, prompt = 'Menga kalkulyator yasab ber') {
 
 const web = spawn(process.execPath, [path.join(ROOT, 'server/server.js')],
   { stdio:'ignore', env:{ ...process.env, PORT:String(WEB_PORT), MINI_DATA:DATA,
-                          MINI_ADMIN_TOKEN:'test-admin' } });
+                          MINI_ADMIN_TOKEN:'test-admin', MINI_REGS_PER_HOUR:'500' } });
 
 const api = spawn(process.execPath, [path.join(ROOT, 'test/mock-provider.mjs')],
   { stdio:'ignore', env:{ ...process.env, MOCK_PORT:String(API_PORT) } });
 
-const done = () => { web.kill(); api.kill(); fs.rmSync(DATA, { recursive:true, force:true }); };
+const done = async () => {
+  web.kill(); api.kill();
+  await new Promise(r => setTimeout(r, 300));       // let the server finish its last write
+  fs.rmSync(DATA, { recursive:true, force:true, maxRetries:5, retryDelay:100 });
+};
 await new Promise(r => setTimeout(r, 900));
 
 let chromium, devices;
@@ -64,9 +79,17 @@ try { ({ chromium, devices } = await import('playwright')); }
 catch { console.error('playwright topilmadi. `npm i -D playwright` yoki global o\'rnating.'); done(); process.exit(2); }
 
 const browser = await chromium.launch();
-const newPage = async (state) => {
+let accountSeq = 0;
+
+const newPage = async (state, account = 'auto') => {
   const ctx = await browser.newContext({ ...devices['iPhone 13'] });
-  await ctx.addInitScript(`try { localStorage.setItem('mini.v1', ${JSON.stringify(JSON.stringify(state))}); } catch (e) {}`);
+  const acct = account === 'auto'
+    ? await makeAccount('Tester', 'tester' + (accountSeq++))
+    : account;
+  await ctx.addInitScript(
+    `try { localStorage.setItem('mini.v1', ${JSON.stringify(JSON.stringify(state))});` +
+    (acct ? ` localStorage.setItem('mini.session', ${JSON.stringify(JSON.stringify(acct))});` : '') +
+    ` } catch (e) {}`);
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
@@ -247,7 +270,64 @@ group('Orqaga tugmasi: har qatlam o\'z navbatida yopiladi');
   await ctx.close();
 }
 
-/* ------------------------------------------------------------- 6. market */
+/* ------------------------------------------------------------ 6. accounts */
+
+group('Akkaunt: ro\'yxatdan o\'tish, kirish, chiqish');
+{
+  const { page, ctx, errs } = await newPage(seed(), null);   // no session
+  ok('kirish ekrani ko\'rsatildi', await page.isVisible('#auth-screen'));
+  ok('ilova yopiq', !(await page.isVisible('#composer')));
+
+  await page.click('#auth-tab-register');
+  await page.fill('#auth-name', 'Sarvarbek');
+  await page.fill('#auth-username', 'sarvarbek');
+  await page.fill('#auth-password', 'olmaqogoz7');
+  await page.click('#auth-submit');
+  await page.waitForSelector('#composer', { state:'visible', timeout: 15000 });
+  ok('ro\'yxatdan o\'tib ichkariga kirdi', await page.isVisible('#composer'));
+  ok('kirish ekrani yopildi', !(await page.isVisible('#auth-screen')));
+
+  await page.click('#btn-menu'); await page.waitForTimeout(300);
+  ok('drawerda akkaunt ko\'rinadi', (await page.textContent('#account-name')) === 'Sarvarbek');
+  ok('username ko\'rinadi', (await page.textContent('#account-handle')) === '@sarvarbek');
+
+  await page.click('#btn-account'); await page.waitForTimeout(350);
+  const acctSheet = await page.textContent('#sheet-body');
+  ok('akkaunt oynasida chegara ko\'rinadi', acctSheet.includes('kun qoldi'), acctSheet.slice(0, 80));
+  ok('faolsizlik qoidasi yozilgan', acctSheet.includes('30 kun'));
+
+  // a reload keeps the session
+  await page.reload({ waitUntil:'networkidle' });
+  await page.waitForTimeout(700);
+  ok('sessiya saqlandi', await page.isVisible('#composer'));
+  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+group('Akkaunt: noto\'g\'ri parol va o\'rnatilgan ilova');
+{
+  const { page, ctx } = await newPage(seed(), null);
+  await page.fill('#auth-username', 'sarvarbek');
+  await page.fill('#auth-password', 'notogri');
+  await page.click('#auth-submit');
+  await page.waitForSelector('#auth-error', { state:'visible', timeout: 15000 });
+  ok('noto\'g\'ri parol rad etildi', (await page.textContent('#auth-error')).includes('noto'));
+  ok('ichkariga kirmadi', !(await page.isVisible('#composer')));
+  await ctx.close();
+
+  // A mini app already on the home screen must open without an account.
+  const app = { id:'local1', name:'Mahalliy', emoji:'🧮', color:'#E8171F',
+    files:{ 'index.html':'<!doctype html><html><body><h1 id="h">Salom</h1></body></html>' },
+    assets:[], createdAt:1, updatedAt:1 };
+  const { page: p2, ctx: c2 } = await newPage(seed({ apps:[app] }), null);
+  await p2.goto(`${ORIGIN}/?app=local1`, { waitUntil:'networkidle' });
+  await p2.waitForTimeout(900);
+  ok('o\'rnatilgan ilova akkauntsiz ochiladi', await p2.isVisible('#player'));
+  ok('kirish so\'ralmadi', !(await p2.isVisible('#auth-screen')));
+  await c2.close();
+}
+
+/* ------------------------------------------------------------- 7. market */
 
 group('Market: tekshiruv, joylash, kunlik chegara');
 let publishedId = null;
@@ -318,27 +398,114 @@ group('Market: ulashilgan havola va server tekshiruvi');
   ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
   await ctx.close();
 
-  const post = (body, device) => fetch(ORIGIN + '/api/market/submit', {
-    method:'POST', headers:{ 'Content-Type':'application/json', 'X-Mini-Device':device },
+  const post = (body, token) => fetch(ORIGIN + '/api/market/submit', {
+    method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token },
     body: JSON.stringify(body) }).then(async r => ({ status:r.status, body: await r.json() }));
+
+  const anon = await fetch(ORIGIN + '/api/market/submit', { method:'POST',
+    headers:{ 'Content-Type':'application/json' }, body:'{}' });
+  ok('akkauntsiz joylab bo\'lmaydi', anon.status === 401, String(anon.status));
 
   const good = { name:'Tashqi', emoji:'🧪', color:'#E8171F', review:{ ok:true, category:'test' },
     files:{ 'index.html':'<!doctype html><html><body>' + 'x'.repeat(300) +
       '<script src="https://cdn.example.com/a.js"><\/script></body></html>' } };
-  const r1 = await post(good, 'device-aaaaaaaa');
+  const r1 = await post(good, (await makeAccount('Val A', 'valid_a')).token);
   ok('tashqi skriptli ilova rad etildi', r1.status === 400 && /mustaqil/.test(r1.body.error), JSON.stringify(r1));
 
-  const r2 = await post({ ...good, files:{ 'index.html':'<html><body>hi</body></html>' } }, 'device-bbbbbbbb');
+  const r2 = await post({ ...good, files:{ 'index.html':'<html><body>hi</body></html>' } },
+    (await makeAccount('Val B', 'valid_b')).token);
   ok('bo\'sh ilova rad etildi', r2.status === 400, JSON.stringify(r2));
 
   const r3 = await post({ ...good, review:{ ok:false },
-    files:{ 'index.html':'<!doctype html><html><body>' + 'y'.repeat(300) + '</body></html>' } }, 'device-cccccccc');
+    files:{ 'index.html':'<!doctype html><html><body>' + 'y'.repeat(300) + '</body></html>' } },
+    (await makeAccount('Val C', 'valid_c')).token);
   ok('tekshiruvsiz ilova rad etildi', r3.status === 400 && /tekshiruv/.test(r3.body.error), JSON.stringify(r3));
+}
+
+/* --------------------------------------------- 9. the inactivity rule */
+
+group('Faolsiz akkauntlar o\'chiriladi');
+{
+  const { Auth } = await import(path.join(ROOT, 'server/auth.js'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-auth-'));
+  const a = new Auth(dir, { inactiveDays: 30 });
+
+  a.register({ name:'Faol', username:'faol', password:'olmaqogoz7' });
+  a.register({ name:'Eski', username:'eski', password:'olmaqogoz7' });
+  const stale = a.users.find(u => u.username === 'eski');
+  stale.lastSeen = Date.now() - 31 * 86_400_000;
+
+  ok('30 kunlik jimlikdan keyin 0 kun qoladi', a.daysLeft(stale) === 0, String(a.daysLeft(stale)));
+  const removed = a.sweep();
+  ok('faolsiz akkaunt o\'chdi', removed.length === 1 && a.users.length === 1, JSON.stringify(removed));
+  ok('faol akkaunt qoldi', a.users[0].username === 'faol');
+  ok('o\'chgan username qayta band emas', !a.byName.has('eski'));
+
+  // the file on disk agrees with memory
+  const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'users.json'), 'utf8'));
+  ok('diskda ham o\'chdi', onDisk.length === 1 && onDisk[0].username === 'faol');
+
+  // tokens survive a restart, forged ones never work
+  const token = a.issue(a.users[0]);
+  const b = new Auth(dir, { inactiveDays: 30 });
+  ok('token qayta ishga tushirishdan keyin ham ishlaydi', b.verify(token)?.username === 'faol');
+  ok('soxta token ishlamaydi', b.verify(token.slice(0, -1) + 'x') === null);
+  ok('parol tekshiruvi ishlaydi',
+     !!b.login({ username:'faol', password:'olmaqogoz7', ip:'1.1.1.1' }).user &&
+     !!b.login({ username:'faol', password:'boshqa', ip:'2.2.2.2' }).error);
+
+  // changing the password must not leave the old session usable
+  const old = b.issue(b.users[0]);
+  b.changePassword(b.users[0], { current:'olmaqogoz7', next:'yangiparol9' });
+  ok('parol o\'zgarsa eski sessiya o\'ladi', b.verify(old) === null);
+  ok('yangi parol ishlaydi', !!b.login({ username:'faol', password:'yangiparol9', ip:'3.3.3.3' }).user);
+
+  // sign-ups are capped per address, and the cap is per address
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-auth2-'));
+  process.env.MINI_REGS_PER_HOUR = '3';
+  const { Auth: Auth2 } = await import(path.join(ROOT, 'server/auth.js') + '?cap');
+  const c = new Auth2(dir2, {});
+  const tries = [1, 2, 3, 4].map(i =>
+    c.register({ name:'Yangi', username:'yangi' + i, password:'olmaqogoz7', ip:'9.9.9.9' }));
+  ok('soatiga cheklangan ro\'yxatdan o\'tish', !!tries[3].error && !tries[2].error,
+     JSON.stringify(tries.map(t => t.error || 'ok')));
+  ok('boshqa manzil bloklanmaydi',
+     !c.register({ name:'Yangi', username:'boshqa1', password:'olmaqogoz7', ip:'8.8.8.8' }).error);
+  fs.rmSync(dir2, { recursive:true, force:true });
+  fs.rmSync(dir, { recursive:true, force:true });
+}
+
+/* ------------------------------------------------ 10. translation tables */
+
+group('Tarjima jadvallari');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'js/i18n.js'), 'utf8');
+  const blocks = [...src.matchAll(/^  (uz|en|ru): \{$([\s\S]*?)^  \},$/gm)];
+  ok('uchta til bor', blocks.length === 3, String(blocks.length));
+
+  // Nested tables (steps:{…}) carry their own key names; flatten them out
+  // before looking for duplicates at the top level.
+  const keysOf = body => [...body.replace(/\w+:\s*\{[^{}]*\}/g, 'nested:0')
+    .matchAll(/(?:^|[,{]\s*)\n?\s*([a-zA-Z]\w*):/g)].map(m => m[1]);
+  const sets = blocks.map(([, lang, body]) => {
+    const keys = keysOf(body);
+    const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
+    // A repeated key silently wins in a JS object literal, and the loser is
+    // usually the new one — a whole string quietly reverting to something else.
+    ok(`${lang}: takrorlangan kalit yo'q`, dupes.length === 0, [...new Set(dupes)].join(', '));
+    return new Set(keys);
+  });
+
+  const [uz, en, ru] = sets;
+  const missing = (a, b, an, bn) => [...a].filter(k => !b.has(k))
+    .map(k => `${bn} da yo'q: ${k}`);
+  const gaps = [...missing(uz, en, 'uz', 'en'), ...missing(uz, ru, 'uz', 'ru')];
+  ok('barcha kalitlar uchala tilda bor', gaps.length === 0, gaps.slice(0, 6).join(' | '));
 }
 
 /* ------------------------------------------------------------- results */
 
 await browser.close();
-done();
+await done();
 console.log(`\n${pass} ta o'tdi, ${fail} ta yiqildi.`);
 process.exit(fail ? 1 : 0);
