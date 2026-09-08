@@ -1,0 +1,111 @@
+/** Three languages, one flat table. Missing key falls back to Uzbek. */
+
+const T = {
+  uz: {
+    newChat:'Yangi chat', settings:'Sozlamalar', apps:'Ilovalarim', chats:'Chatlar',
+    today:'Bugun', week:'Shu hafta', older:'Avvalroq',
+    ask:'Nima yasaymiz?', send:'Yuborish', stop:'To\'xtatish',
+    emptyTitle:'Salom 👋', emptySub:'O\'zingizga mini ilova yasang yoki shunchaki gaplashing.',
+    noKeyTitle:'API kalit kerak', noKeySub:'Boshlash uchun o\'z kalitingizni kiriting. Kalit faqat shu telefonda saqlanadi.',
+    addKey:'Kalitni kiritish',
+    apiKey:'API kalit', baseUrl:'Server manzili (API)', model:'Model', chooseModel:'Modelni tanlang',
+    searchModel:'Model qidirish…', loadModels:'Modellarni yuklash', noModels:'Model topilmadi',
+    role:'Rol', roles:'Rollar', newRole:'Yangi rol', roleName:'Nomi', rolePrompt:'Ko\'rsatma (system prompt)',
+    roleTools:'Ilova yasay olsin', roleToolsSub:'Fayl yozish, tekshirish va nashr qilish',
+    lang:'Til', theme:'Ko\'rinish', dark:'Tungi', light:'Kunduzgi', system:'Tizim',
+    save:'Saqlash', cancel:'Bekor qilish', delete:'O\'chirish', rename:'Nomini o\'zgartirish',
+    open:'Ochish', edit:'Tahrirlash', done:'Tayyor', close:'Yopish', copy:'Nusxalash', copied:'Nusxalandi',
+    install:'Ilovani ekranga o\'rnatish', installSub:'Telefon ekranidan bir bosishda ochiladi',
+    installIos:'Pastdagi «Ulashish» → «Bosh ekranga qo\'shish»', later:'Keyinroq',
+    addToHome:'Bosh ekranga qo\'shish', appName:'Ilova nomi', icon:'Belgi', color:'Rang',
+    publish:'Ilova qilib saqlash', published:'Ilova qo\'shildi', update:'Yangilash',
+    noApps:'Hali ilova yo\'q.\nChatda «kalkulyator yasab ber» deb yozing.',
+    deviceAccess:'Kamera va mikrofon', deviceWarn:'Diqqat: bunday ilova API kalitingizni o\'qiy oladi. Faqat o\'zingiz ishonadigan ilova uchun yoqing.',
+    usage:'Sarflangan', tokens:'token', storage:'Xotira', clearAll:'Hammasini o\'chirish',
+    confirmDelete:'O\'chirilsinmi?', yes:'Ha', no:'Yo\'q',
+    thinking:'O\'ylayapti…', writing:'yozmoqda', checking:'tekshirmoqda', fixing:'tuzatmoqda',
+    error:'Xatolik', retry:'Qayta urinish', share:'Ulashish', code:'Kod', preview:'Ko\'rish',
+    ideas:['Kalkulyator yasab ber','Kunlik odat trekeri','Kamera bilan eslatma','Ranglar tanlagich'],
+    about:'Mini haqida', reset:'Sozlamalarni tozalash',
+    steps:{ write:'Fayl yozildi', edit:'Fayl tuzatildi', read:'Fayl o\'qildi', list:'Fayllar',
+            check:'Tekshirildi', shot:'Ekran surati', publish:'Ilova saqlandi', asset:'Rasm qo\'shildi' },
+  },
+  en: {
+    newChat:'New chat', settings:'Settings', apps:'My apps', chats:'Chats',
+    today:'Today', week:'This week', older:'Earlier',
+    ask:'What shall we build?', send:'Send', stop:'Stop',
+    emptyTitle:'Hi 👋', emptySub:'Build yourself a mini app, or just talk.',
+    noKeyTitle:'API key needed', noKeySub:'Enter your own key to start. It stays on this phone only.',
+    addKey:'Add key',
+    apiKey:'API key', baseUrl:'API base URL', model:'Model', chooseModel:'Choose a model',
+    searchModel:'Search models…', loadModels:'Load models', noModels:'No models found',
+    role:'Role', roles:'Roles', newRole:'New role', roleName:'Name', rolePrompt:'System prompt',
+    roleTools:'Can build apps', roleToolsSub:'Write files, run checks, publish',
+    lang:'Language', theme:'Appearance', dark:'Dark', light:'Light', system:'System',
+    save:'Save', cancel:'Cancel', delete:'Delete', rename:'Rename',
+    open:'Open', edit:'Edit', done:'Done', close:'Close', copy:'Copy', copied:'Copied',
+    install:'Install to home screen', installSub:'One tap from your phone screen',
+    installIos:'Tap Share → Add to Home Screen', later:'Later',
+    addToHome:'Add to home screen', appName:'App name', icon:'Icon', color:'Colour',
+    publish:'Save as app', published:'App added', update:'Update',
+    noApps:'No apps yet.\nTry: "build me a calculator".',
+    deviceAccess:'Camera & microphone', deviceWarn:'Warning: such an app can read your API key. Enable only for apps you trust.',
+    usage:'Used', tokens:'tokens', storage:'Storage', clearAll:'Delete everything',
+    confirmDelete:'Delete?', yes:'Yes', no:'No',
+    thinking:'Thinking…', writing:'writing', checking:'checking', fixing:'fixing',
+    error:'Error', retry:'Retry', share:'Share', code:'Code', preview:'Preview',
+    ideas:['Build a calculator','Daily habit tracker','Camera notes','Colour picker'],
+    about:'About Mini', reset:'Reset settings',
+    steps:{ write:'File written', edit:'File patched', read:'File read', list:'Files',
+            check:'Checked', shot:'Screenshot', publish:'App saved', asset:'Image added' },
+  },
+  ru: {
+    newChat:'Новый чат', settings:'Настройки', apps:'Мои приложения', chats:'Чаты',
+    today:'Сегодня', week:'На этой неделе', older:'Ранее',
+    ask:'Что построим?', send:'Отправить', stop:'Стоп',
+    emptyTitle:'Привет 👋', emptySub:'Сделайте себе мини-приложение или просто поговорите.',
+    noKeyTitle:'Нужен API-ключ', noKeySub:'Введите свой ключ. Он хранится только на этом телефоне.',
+    addKey:'Добавить ключ',
+    apiKey:'API-ключ', baseUrl:'Адрес API', model:'Модель', chooseModel:'Выберите модель',
+    searchModel:'Поиск моделей…', loadModels:'Загрузить модели', noModels:'Ничего не найдено',
+    role:'Роль', roles:'Роли', newRole:'Новая роль', roleName:'Название', rolePrompt:'Системная инструкция',
+    roleTools:'Может делать приложения', roleToolsSub:'Файлы, проверка, публикация',
+    lang:'Язык', theme:'Тема', dark:'Тёмная', light:'Светлая', system:'Система',
+    save:'Сохранить', cancel:'Отмена', delete:'Удалить', rename:'Переименовать',
+    open:'Открыть', edit:'Изменить', done:'Готово', close:'Закрыть', copy:'Копировать', copied:'Скопировано',
+    install:'Установить на экран', installSub:'Одно касание с экрана телефона',
+    installIos:'«Поделиться» → «На экран «Домой»»', later:'Позже',
+    addToHome:'На главный экран', appName:'Название', icon:'Иконка', color:'Цвет',
+    publish:'Сохранить как приложение', published:'Приложение добавлено', update:'Обновить',
+    noApps:'Пока пусто.\nНапишите: «сделай калькулятор».',
+    deviceAccess:'Камера и микрофон', deviceWarn:'Внимание: такое приложение может прочитать ваш API-ключ. Включайте только для доверенных.',
+    usage:'Израсходовано', tokens:'токенов', storage:'Память', clearAll:'Удалить всё',
+    confirmDelete:'Удалить?', yes:'Да', no:'Нет',
+    thinking:'Думает…', writing:'пишет', checking:'проверяет', fixing:'исправляет',
+    error:'Ошибка', retry:'Повторить', share:'Поделиться', code:'Код', preview:'Просмотр',
+    ideas:['Сделай калькулятор','Трекер привычек','Заметки с камерой','Подбор цветов'],
+    about:'О Mini', reset:'Сбросить настройки',
+    steps:{ write:'Файл записан', edit:'Файл изменён', read:'Файл прочитан', list:'Файлы',
+            check:'Проверено', shot:'Скриншот', publish:'Сохранено', asset:'Изображение' },
+  },
+};
+
+export const LANGS = [ ['uz','O\'zbekcha'], ['en','English'], ['ru','Русский'] ];
+
+let lang = 'uz';
+
+export function setLang(v) {
+  if (!v) {
+    const n = (navigator.language || 'uz').slice(0,2);
+    lang = T[n] ? n : 'uz';
+  } else lang = T[v] ? v : 'uz';
+  document.documentElement.lang = lang;
+}
+
+export function t(key) {
+  const cur = T[lang] || T.uz;
+  return key.split('.').reduce((o,k) => (o||{})[k], cur) ??
+         key.split('.').reduce((o,k) => (o||{})[k], T.uz) ?? key;
+}
+
+export const currentLang = () => lang;

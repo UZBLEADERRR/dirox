@@ -13,6 +13,20 @@ boundaries, a budget and an audit trail.
 
 ---
 
+## Also in this repository: `mini/`
+
+**[Mini](mini/README.md)** — a separate, much smaller product that shares
+nothing with the server above. It is a mobile-first PWA with no backend at all:
+static files and `localStorage`. You bring your own API key, pick any model,
+and ask it for a small app; the agent writes it, runs it in a sandbox, reads
+back its own errors, fixes them, and pins the finished app to your phone's home
+screen with its own name and icon.
+
+Serve the `mini/` folder over HTTPS and it works. `node mini/test/run.mjs`
+drives the whole loop in a real browser against a mock provider.
+
+---
+
 ## What makes it different
 
 **Token efficiency is an architectural constraint, not a setting.**

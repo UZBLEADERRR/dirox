@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Mini</title>
+<meta name="description" content="Cho'ntagingizdagi AI. O'zingizga mini ilovalar yasang.">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="color-scheme" content="dark light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mini">
+<link rel="manifest" href="manifest.webmanifest" id="manifest-link">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon-180.png" id="apple-icon">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="boot" class="boot"><div class="boot-mark">M</div></div>
+
+<!-- ====================== CHAT ====================== -->
+<header class="topbar" id="topbar" hidden>
+  <button class="icon-btn" id="btn-menu" aria-label="Menyu">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+  </button>
+  <button class="topbar-title" id="btn-role">
+    <span id="role-emoji">💬</span>
+    <span id="chat-title">Yangi chat</span>
+    <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
+  <button class="icon-btn" id="btn-apps" aria-label="Ilovalar">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
+  </button>
+</header>
+
+<main class="chat" id="chat" hidden>
+  <div class="messages" id="messages"></div>
+</main>
+
+<form class="composer" id="composer" hidden>
+  <div class="attachments" id="attachments" hidden></div>
+  <div class="composer-row">
+    <button type="button" class="icon-btn ghost" id="btn-attach" aria-label="Rasm">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <textarea id="input" rows="1" placeholder="Nima yasaymiz?" enterkeyhint="send"></textarea>
+    <button type="submit" class="send-btn" id="btn-send" aria-label="Yuborish">
+      <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg>
+    </button>
+    <button type="button" class="send-btn stop" id="btn-stop" hidden aria-label="To'xtatish">
+      <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>
+    </button>
+  </div>
+  <input type="file" id="file-input" accept="image/*" multiple hidden>
+</form>
+
+<!-- ====================== APPS (home screen) ====================== -->
+<section class="screen" id="apps-screen" hidden>
+  <header class="topbar">
+    <button class="icon-btn" id="btn-apps-back" aria-label="Orqaga">
+      <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+    </button>
+    <div class="topbar-title static" id="apps-title">Ilovalarim</div>
+    <span class="icon-btn" style="visibility:hidden"></span>
+  </header>
+  <div class="apps-grid" id="apps-grid"></div>
+</section>
+
+<!-- ====================== DRAWER ====================== -->
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden>
+  <div class="drawer-head">
+    <button class="new-chat" id="btn-new-chat">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      <span id="t-new-chat">Yangi chat</span>
+    </button>
+  </div>
+  <div class="chat-list" id="chat-list"></div>
+  <div class="drawer-foot">
+    <button class="drawer-item" id="btn-settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M4 12h2m12 0h2M12 4v2m0 12v2M6.6 6.6l1.4 1.4m8 8l1.4 1.4m0-10.8l-1.4 1.4m-8 8l-1.4 1.4"/></svg>
+      <span id="t-settings">Sozlamalar</span>
+    </button>
+    <div class="usage" id="usage"></div>
+  </div>
+</aside>
+
+<!-- ====================== SHEET ====================== -->
+<div class="sheet-wrap" id="sheet-wrap" hidden>
+  <div class="sheet-scrim" id="sheet-scrim"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-grab"></div>
+    <div class="sheet-body" id="sheet-body"></div>
+  </div>
+</div>
+
+<!-- ====================== MINI-APP PLAYER ====================== -->
+<div class="player" id="player" hidden>
+  <div class="player-bar" id="player-bar">
+    <button class="icon-btn" id="btn-player-close" aria-label="Yopish">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="player-name" id="player-name"></div>
+    <button class="icon-btn" id="btn-player-menu" aria-label="Menyu">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>
+    </button>
+  </div>
+  <div class="player-stage" id="player-stage"></div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+<div class="sandbox-hidden" id="sandbox-hidden" aria-hidden="true"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

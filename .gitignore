@@ -6,3 +6,4 @@ node_modules/
 workspaces/
 .cache/
 coverage/
+mini/test/last-request.json
