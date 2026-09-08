@@ -205,6 +205,26 @@ yarim ishlaydigan tugma yo'q, holat `localStorage`da saqlanadi, bo'sh va xato
 holatlari o'ylangan, dizayn mobil uchun (44px tugmalar, safe-area, tungi va
 kunduzgi rejim).
 
+### Parallel yozuvchilar (sub-agentlar)
+
+Yigirma darslik kursni bitta agent ketma-ket yozsa, yigirma marta borib
+keladi va har safar oldingi o'n to'qqiztasining izini qayta o'qiydi — sekin
+ham, qimmat ham.
+
+Shuning uchun asosiy ish **fanout** qilinadi. Agent `write_lessons` ni bir
+marta chaqiradi, ilova esa har bir dars uchun alohida, kichik so'rov
+yuboradi: faqat kurs nomi, shu darsning o'rni, oldingi va keyingi darslar
+sarlavhalari, ishlatsa bo'ladigan markup va (kitob yuklangan bo'lsa) o'sha
+darsga tegishli parcha. Hech narsa to'planib bormaydi, bir nechtasi bir
+vaqtda ketadi, har biri o'z qatorida jonli ko'rinadi.
+
+Reja, tekshiruv va tuzatish asosiy agentda qoladi — sub-agentlar faqat bitta
+matn yozadi, chunki darslar bir-biriga bog'liq emas va shu qism toza
+parallellashadi.
+
+Nechta bir vaqtda ishlashini Sozlamalardan o'zgartirasiz (standart 4).
+Kitob boblari ham xuddi shunday — `write_chapters`.
+
 ### Token tejash
 
 Bu ilova foydalanuvchining puliga ishlaydi, shuning uchun tejamkorlik
@@ -216,6 +236,8 @@ arxitekturada:
 - **System promptda loyihaning o'zi emas, ro'yxati turadi:**
   `index.html(2.1k) app.js(4.3k)`.
 - **Chat oynasi cheklangan** (standart 24 xabar, sozlamalarda o'zgaradi).
+- **Sub-agent konteksti kichik** — har biri faqat o'z darsini ko'radi, butun
+  suhbatni emas.
 - Kod chatga nusxalanmaydi — artifact kartasida turadi.
 
 ---
@@ -280,7 +302,8 @@ ekranda ochiladi.
 | `app.css` → `:root` | ranglar, radius, tap o'lchami |
 | `js/i18n.js` | tillar (uz, en, ru) |
 | `js/store.js` → `DEFAULT_ROLES` | tayyor rollar |
-| `js/agent.js` → `BUILDER_PROMPT` | agentning asosiy ko'rsatmasi |
+| `js/agent.js` → `APP_PROMPT` / `COURSE_PROMPT` / `BOOK_PROMPT` | agent ko'rsatmalari |
+| `js/subagent.js` → `LESSON_SYSTEM` / `CHAPTER_SYSTEM` | sub-agent ko'rsatmalari |
 | `js/market.js` → `REVIEW_PROMPT` | market moderatorining ko'rsatmasi |
 | `server/auth.js` → `WEAK` | qabul qilinmaydigan oddiy parollar |
 | `assets/brand/logo-source.png` | logo; keyin `npm run icons` |

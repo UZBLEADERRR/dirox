@@ -12,6 +12,7 @@
 
 import { runCheck, formatCheck } from './sandbox.js';
 import { buildCourse, buildBook } from './templates.js';
+import { runWorkers, sourceSlice, LESSON_SYSTEM, CHAPTER_SYSTEM, BLOCKS } from './subagent.js';
 import { t } from './i18n.js';
 
 /* ---------------------------------------------------------------- schemas */
@@ -74,8 +75,13 @@ const courseTools = [
             minutes:{ type:'integer' } }, required:['id','title'] } } },
           required:['title','lessons'] } } },
     required:['title','modules'] },
+  { name:'write_lessons',
+    description:'Write several lessons at once — they are handed to parallel writers, which is how the bulk of a course should be produced. Omit ids to write every lesson that is still missing.',
+    params:{ ids:{ type:'array', items:{ type:'string' },
+      description:'Lesson ids. Leave empty for all unwritten lessons.' } },
+    required:[] },
   { name:'write_lesson',
-    description:'Write one lesson body as HTML. No <html>, <head> or <style> — the player supplies those.',
+    description:'Write or rewrite ONE lesson yourself. Use this to fix a lesson, not to produce the course.',
     params:{ id:{ type:'string' },
              html:{ type:'string', description:'Lesson body HTML' } },
     required:['id','html'] },
@@ -93,8 +99,11 @@ const bookTools = [
         id:{ type:'string', description:'short slug, unique' },
         title:{ type:'string' } }, required:['id','title'] } } },
     required:['title','chapters'] },
+  { name:'write_chapters',
+    description:'Write several chapters at once — they are handed to parallel writers, which is how the bulk of a book should be produced. Omit ids to write every chapter that is still missing.',
+    params:{ ids:{ type:'array', items:{ type:'string' } } }, required:[] },
   { name:'write_chapter',
-    description:'Write one chapter body as HTML. No <html>, <head> or <style> — the reader supplies those.',
+    description:'Write or rewrite ONE chapter yourself. Use this to fix a chapter, not to produce the book.',
     params:{ id:{ type:'string' }, html:{ type:'string' } }, required:['id','html'] },
   { name:'set_cover',
     description:'Set the book cover as inline SVG, 400x600 viewBox. Typography and shapes only; no external images.',
@@ -253,6 +262,52 @@ export async function runTool(name, args, ctx) {
         : `OK all ${all.length} lessons written. Run run_check, then publish_app.` };
     }
 
+    case 'write_lessons': {
+      if (!p.course) return { text:'ERROR: call course_outline first.' };
+      const all = p.course.modules.flatMap(m => m.lessons.map(l => ({ ...l, module:m.title })));
+      const want = (Array.isArray(args.ids) && args.ids.length)
+        ? args.ids.map(slug).filter(id => all.some(l => l.id === id))
+        : all.filter(l => !p.files[`lessons/${l.id}.html`]).map(l => l.id);
+      if (!want.length) return { text:'Every lesson is already written.' };
+
+      const jobs = want.map(id => {
+        const i = all.findIndex(l => l.id === id);
+        const l = all[i];
+        const near = (from, to) => all.slice(Math.max(0, from), to).map(x => x.title).join('; ') || '—';
+        return { key:id, label:`Lesson ${i + 1}/${all.length}: ${l.title}`, prompt:
+`COURSE: ${p.course.title}${p.course.subtitle ? ` — ${p.course.subtitle}` : ''}
+LANGUAGE: write everything in ${p.course.language || 'en'}
+MODULE: ${l.module}
+THIS LESSON: ${l.title}${l.minutes ? ` (${l.minutes} minutes)` : ''} — number ${i + 1} of ${all.length}
+COMES AFTER: ${near(i - 2, i)}
+COMES BEFORE: ${near(i + 1, i + 3)}
+
+${BLOCKS}${sourceSlice(p.source, i, all.length)}` };
+      });
+
+      const res = await runWorkers(jobs, {
+        settings: ctx.settings, signal: ctx.signal, workers: ctx.settings?.workers,
+        onStep: ctx.onStep, onUsage: ctx.onUsage, system: LESSON_SYSTEM,
+      });
+
+      let wrote = 0;
+      const failed = [];
+      for (const [id, r] of res) {
+        if (r.ok) { p.files[`lessons/${id}.html`] = r.body; wrote++; }
+        else failed.push(`${id} (${r.error})`);
+      }
+      rebuild(p);
+      ctx.onArtifact?.();
+      // Settle this call's own row, which has been sitting open while the
+      // writers worked underneath it.
+      ctx.onStep?.({ kind:'lesson', ok: !failed.length,
+                     label:`Wrote ${wrote} of ${want.length} lessons` });
+      const left = all.filter(l => !p.files[`lessons/${l.id}.html`]).map(l => l.id);
+      return { text:`Wrote ${wrote} of ${want.length} lessons.` +
+        (failed.length ? `\nFailed: ${failed.join(', ')} — retry with write_lessons.` : '') +
+        (left.length ? `\nStill missing: ${left.join(', ')}` : '\nAll lessons are written. Run run_check, then publish_app.') };
+    }
+
     /* ----------------------------------------------------------- book */
 
     case 'book_outline': {
@@ -290,6 +345,50 @@ export async function runTool(name, args, ctx) {
       return { text: next
         ? `OK ${written}/${p.book.chapters.length}. Next id: ${next.id} — "${next.title}"`
         : `OK all chapters written. Add set_cover if you have not, then publish_app.` };
+    }
+
+    case 'write_chapters': {
+      if (!p.book) return { text:'ERROR: call book_outline first.' };
+      const all = p.book.chapters;
+      const want = (Array.isArray(args.ids) && args.ids.length)
+        ? args.ids.map(slug).filter(id => all.some(c => c.id === id))
+        : all.filter(c => !p.files[`chapters/${c.id}.html`]).map(c => c.id);
+      if (!want.length) return { text:'Every chapter is already written.' };
+
+      const jobs = want.map(id => {
+        const i = all.findIndex(c => c.id === id);
+        const c = all[i];
+        const near = (from, to) => all.slice(Math.max(0, from), to).map(x => x.title).join('; ') || '—';
+        return { key:id, label:`Chapter ${i + 1}/${all.length}: ${c.title}`, prompt:
+`BOOK: ${p.book.title}${p.book.subtitle ? ` — ${p.book.subtitle}` : ''}
+AUTHOR: ${p.book.author || 'the author'}
+LANGUAGE: write everything in ${p.book.language || 'en'}
+THIS CHAPTER: ${c.title} — number ${i + 1} of ${all.length}
+COMES AFTER: ${near(i - 2, i)}
+COMES BEFORE: ${near(i + 1, i + 3)}
+
+${BLOCKS}${sourceSlice(p.source, i, all.length)}` };
+      });
+
+      const res = await runWorkers(jobs, {
+        settings: ctx.settings, signal: ctx.signal, workers: ctx.settings?.workers,
+        onStep: ctx.onStep, onUsage: ctx.onUsage, system: CHAPTER_SYSTEM,
+      });
+
+      let wrote = 0;
+      const failed = [];
+      for (const [id, r] of res) {
+        if (r.ok) { p.files[`chapters/${id}.html`] = r.body; wrote++; }
+        else failed.push(`${id} (${r.error})`);
+      }
+      rebuild(p);
+      ctx.onArtifact?.();
+      ctx.onStep?.({ kind:'chapter', ok: !failed.length,
+                     label:`Wrote ${wrote} of ${want.length} chapters` });
+      const left = all.filter(c => !p.files[`chapters/${c.id}.html`]).map(c => c.id);
+      return { text:`Wrote ${wrote} of ${want.length} chapters.` +
+        (failed.length ? `\nFailed: ${failed.join(', ')} — retry with write_chapters.` : '') +
+        (left.length ? `\nStill missing: ${left.join(', ')}` : '\nAll chapters are written. Add set_cover, then run_check and publish_app.') };
     }
 
     case 'set_cover': {

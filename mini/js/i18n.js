@@ -64,7 +64,8 @@ const T = {
   unsupportedFile:'Unsupported file. Use PDF, EPUB, TXT, MD or HTML.',
   steps:{ write:'File written', edit:'File patched', read:'File read', list:'Files',
           check:'Checked', shot:'Screenshot', publish:'Saved', asset:'Image added',
-          outline:'Outline', lesson:'Lesson', chapter:'Chapter', cover:'Cover', source:'Source' },
+          outline:'Outline', lesson:'Lesson', chapter:'Chapter', cover:'Cover', source:'Source',
+          sub:'Writer' },
 };
 
 export function t(key) {

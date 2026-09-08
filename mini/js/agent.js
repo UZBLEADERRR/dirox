@@ -57,8 +57,9 @@ If the goal is vague, ask 3-5 short numbered questions in ONE message and stop: 
 
 THEN
 1. course_outline — the whole syllabus first: 3-7 modules, 10-30 lessons in a sensible teaching order, each with an id, a title and realistic minutes. Build up: foundations, then technique, then practice, then a review or mock test.
-2. write_lesson, one at a time, in the order the tool gives back. Do not stop until every lesson is written.
-3. run_check, then publish_app.
+2. write_lessons — hand the whole list to the parallel writers in ONE call. That is how a course gets built; do not write them one by one. If some come back failed, call it again with just those ids.
+3. Spot-check with read_file, and fix anything weak with write_lesson.
+4. run_check, then publish_app.
 
 WHAT A LESSON IS
 - 400-900 words. Teach; do not list. Concrete examples over description.
@@ -80,7 +81,7 @@ If the brief is thin, ask 2-4 short numbered questions in ONE message and stop: 
 
 THEN
 1. book_outline — title, author, subtitle, and 8-20 chapters that actually progress. No filler chapters.
-2. write_chapter, one at a time, in the order the tool gives back. Do not stop early.
+2. write_chapters — hand the whole list to the parallel writers in ONE call. If some fail, call it again with just those ids.
 3. set_cover — inline SVG, viewBox "0 0 400 600": typography, shapes and colour only. Make it look like a cover a publisher would print, not a diagram.
 4. run_check, then publish_app.
 
@@ -150,6 +151,8 @@ function startLabel(name, a = {}) {
     case 'publish_app':    return `Saving ${a.name || 'the app'}`;
     case 'course_outline': return 'Planning the syllabus';
     case 'write_lesson':   return `Writing the lesson “${a.id || ''}”`;
+    case 'write_lessons':  return `Starting ${a.ids?.length || 'the'} writers on the lessons`;
+    case 'write_chapters': return `Starting ${a.ids?.length || 'the'} writers on the chapters`;
     case 'book_outline':   return 'Planning the chapters';
     case 'write_chapter':  return `Writing the chapter “${a.id || ''}”`;
     case 'set_cover':      return 'Drawing the cover';
@@ -232,7 +235,8 @@ export class Agent {
         // call starts, says what is being touched, and settles when it lands.
         this.onStep?.({ id:stepKey, kind:c.function.name, running:true,
                         label: startLabel(c.function.name, args) });
-        const scoped = { ...this, onStep: st => this.onStep?.({ id:stepKey, ...st }) };
+        const scoped = { ...this, signal,
+                         onStep: st => this.onStep?.({ id:stepKey, ...st }) };
 
         let out;
         try { out = await runTool(c.function.name, args, scoped); }

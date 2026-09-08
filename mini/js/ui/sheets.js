@@ -95,6 +95,7 @@ export function openSettings(afterChange) {
       sliderRow('Creativity (temperature)', s.temperature, 0, 1.4, 0.1, v => { s.temperature = v; save(); }),
       sliderRow('Messages remembered', s.historyLimit, 6, 60, 2, v => { s.historyLimit = v; save(); }),
       sliderRow('Agent step limit', s.maxSteps, 4, 60, 1, v => { s.maxSteps = v; save(); }),
+      sliderRow('Parallel writers', s.workers ?? 4, 1, 8, 1, v => { s.workers = v; save(); }),
 
       el('h4', { text:t('storage') }),
       el('div', { class:'note', text:`${fmtBytes(storageBytes())} · ${state.chats.length} chats · ${state.apps.length} apps` }),

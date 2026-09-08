@@ -46,6 +46,7 @@ const DEFAULTS = {
     temperature: 0.7,
     historyLimit: 24,         // messages kept in the request window
     maxSteps: 26,             // agent tool-loop budget
+    workers: 4,               // lessons or chapters written in parallel
     installDismissed: false,
     marketUrl: '',            // '' = same origin as this page
     useFree: false,           // use the model the server pays for

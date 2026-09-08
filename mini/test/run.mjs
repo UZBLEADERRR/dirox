@@ -446,7 +446,60 @@ group('Market: shared links and server validation');
   ok('an unreviewed app is refused', r3.status === 400 && /review/.test(r3.body.error), JSON.stringify(r3));
 }
 
-/* ------------------------------------------------- 9. the free model */
+/* ------------------------------------------------ 9. parallel writers */
+
+group('Parallel writers: the pool itself');
+{
+  const { page, ctx, errs } = await newPage(seed());
+  const r = await page.evaluate(async (api) => {
+    const { runWorkers, LESSON_SYSTEM } = await import('./js/subagent.js');
+    const settings = { baseUrl: api, apiKey:'k', model:'mock/fast' };
+    const jobs = [1, 2, 3, 4, 5].map(i =>
+      ({ key:'k' + i, label:'L' + i, prompt:'THIS LESSON: Lesson ' + i + ' — number ' + i + ' of 5' }));
+
+    let live = 0, peak = 0;
+    const track = st => { if (st.running) { live++; peak = Math.max(peak, live); } else live--; };
+
+    const t0 = Date.now();
+    const two = await runWorkers(jobs, { settings, workers:2, system: LESSON_SYSTEM, onStep: track });
+    const twoMs = Date.now() - t0;
+
+    live = 0;
+    let peak5 = 0;
+    const track5 = st => { if (st.running) { live++; peak5 = Math.max(peak5, live); } else live--; };
+    const t1 = Date.now();
+    const five = await runWorkers(jobs, { settings, workers:5, system: LESSON_SYSTEM, onStep: track5 });
+    const fiveMs = Date.now() - t1;
+
+    // A system the mock does not answer with prose: every job should fail,
+    // and the pool should still finish and report each one.
+    const bad = await runWorkers(jobs.slice(0, 3), { settings, workers:3, system:'nothing to do' });
+
+    const bodies = [...two.values()].map(v => v.body || '');
+    return {
+      peak, peak5, twoMs, fiveMs,
+      okTwo: [...two.values()].filter(v => v.ok).length,
+      okFive: [...five.values()].filter(v => v.ok).length,
+      badOk: [...bad.values()].filter(v => v.ok).length,
+      badCount: bad.size,
+      badError: [...bad.values()][0]?.error || '',
+      sample: bodies[0].slice(0, 20),
+      keys: [...two.keys()].join(','),
+    };
+  }, API);
+
+  ok('every job comes back', r.okTwo === 5 && r.keys === 'k1,k2,k3,k4,k5', JSON.stringify(r.keys));
+  ok('the pool width is respected', r.peak === 2, String(r.peak));
+  ok('a wider pool runs more at once', r.peak5 === 5, String(r.peak5));
+  ok('and finishes sooner', r.fiveMs < r.twoMs, `${r.fiveMs}ms vs ${r.twoMs}ms`);
+  ok('bodies arrive as HTML', r.sample.startsWith('<p>'), r.sample);
+  ok('a failing batch still returns every job', r.badCount === 3 && r.badOk === 0, JSON.stringify(r));
+  ok('and says why', /empty/.test(r.badError), r.badError);
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+/* ------------------------------------------------ 10. the free model */
 
 group('Free model: the operator pays, the server holds the key');
 {
@@ -511,7 +564,7 @@ group('Free model: the operator pays, the server holds the key');
   ok('the operator can turn it off again', after.free === null, JSON.stringify(after));
 }
 
-/* --------------------------------------------- 10. the inactivity rule */
+/* --------------------------------------------- 11. the inactivity rule */
 
 group('The inactivity rule');
 {
@@ -581,7 +634,9 @@ group('Course: outline, lessons, player');
 
   const steps = await page.locator('.msg.ai .step b').allTextContents();
   ok('an outline came first', steps[0]?.startsWith('Outline'), steps.join(' | '));
-  ok('three lessons were written', steps.filter(x => x.startsWith('Lesson')).length === 3, steps.join(' | '));
+  ok('the batch reports what it wrote', steps.some(x => x === 'Wrote 3 of 3 lessons'), steps.join(' | '));
+  ok('each writer has its own row',
+     steps.filter(x => /^Lesson \d\/3:/.test(x)).length === 3, steps.join(' | '));
   ok('the card counts lessons',
      (await page.textContent('.artifact-meta span')).includes('3 lessons'),
      await page.textContent('.artifact-meta span'));
@@ -590,6 +645,9 @@ group('Course: outline, lessons, player');
   const files = Object.keys(st.chats[0].project.files);
   ok('lesson files are kept separately', files.filter(f => f.startsWith('lessons/')).length === 3, files.join());
   ok('the player was generated', files.includes('index.html'));
+  const oneLesson = st.chats[0].project.files['lessons/intro.html'];
+  ok('the markdown fence is stripped off', !!oneLesson && !oneLesson.includes('```'),
+     (oneLesson || '').slice(0, 40));
 
   // open it and walk through a lesson
   await page.click('.artifact-actions .btn');
