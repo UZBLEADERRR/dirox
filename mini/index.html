@@ -4,65 +4,91 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Mini</title>
-<meta name="description" content="Cho'ntagingizdagi AI. O'zingizga mini ilovalar yasang.">
-<meta name="theme-color" content="#0b0b0c">
+<meta name="description" content="O'zingizga ilova yasang. AI yozadi, tekshiradi va telefon ekraningizga qo'yadi.">
+<meta name="theme-color" content="#0A0A0B">
 <meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mini">
+<meta property="og:title" content="Mini">
+<meta property="og:description" content="O'zingizga ilova yasang. Bir bosishda ekraningizga.">
+<meta property="og:image" content="assets/og.png">
 <link rel="manifest" href="manifest.webmanifest" id="manifest-link">
-<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="assets/icon-180.png" id="apple-icon">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 
-<div id="boot" class="boot"><div class="boot-mark">M</div></div>
+<div id="boot" class="boot"><img src="assets/mark.png" alt="Mini"></div>
 
-<!-- ====================== CHAT ====================== -->
+<!-- ====================== TOP BAR ====================== -->
 <header class="topbar" id="topbar" hidden>
   <button class="icon-btn" id="btn-menu" aria-label="Menyu">
     <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
   </button>
-  <button class="topbar-title" id="btn-role">
-    <span id="role-emoji">💬</span>
-    <span id="chat-title">Yangi chat</span>
-    <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-  </button>
-  <button class="icon-btn" id="btn-apps" aria-label="Ilovalar">
+
+  <div class="seg-top" id="tabs" data-on="chat">
+    <div class="thumb"></div>
+    <button data-tab="chat" class="on" id="tab-chat">Chat</button>
+    <button data-tab="market" id="tab-market">Market</button>
+  </div>
+
+  <button class="icon-btn" id="btn-apps" aria-label="Ilovalarim">
     <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
   </button>
 </header>
 
-<main class="chat" id="chat" hidden>
+<!-- ====================== CHAT ====================== -->
+<main class="view" id="view-chat" hidden>
   <div class="messages" id="messages"></div>
 </main>
 
 <form class="composer" id="composer" hidden>
-  <div class="attachments" id="attachments" hidden></div>
-  <div class="composer-row">
-    <button type="button" class="icon-btn ghost" id="btn-attach" aria-label="Rasm">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+  <div class="composer-inner">
+    <div class="attachments" id="attachments" hidden></div>
+    <button type="button" class="role-pill" id="btn-role">
+      <span id="role-emoji">🧩</span><b id="role-name">Ilova yasovchi</b>
+      <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
-    <textarea id="input" rows="1" placeholder="Nima yasaymiz?" enterkeyhint="send"></textarea>
-    <button type="submit" class="send-btn" id="btn-send" aria-label="Yuborish">
-      <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg>
-    </button>
-    <button type="button" class="send-btn stop" id="btn-stop" hidden aria-label="To'xtatish">
-      <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>
-    </button>
+    <div class="composer-row">
+      <button type="button" class="icon-btn ghost" id="btn-attach" aria-label="Rasm">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <textarea id="input" rows="1" placeholder="Nima yasaymiz?" enterkeyhint="send"></textarea>
+      <button type="submit" class="send-btn" id="btn-send" aria-label="Yuborish">
+        <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7"/></svg>
+      </button>
+      <button type="button" class="send-btn stop" id="btn-stop" hidden aria-label="To'xtatish">
+        <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>
+      </button>
+    </div>
   </div>
   <input type="file" id="file-input" accept="image/*" multiple hidden>
 </form>
 
-<!-- ====================== APPS (home screen) ====================== -->
+<!-- ====================== MARKET ====================== -->
+<main class="view" id="view-market" hidden>
+  <div class="market-head">
+    <div class="search-wrap">
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="market-search" type="search" placeholder="Ilova qidirish…" enterkeyhint="search">
+      </div>
+    </div>
+    <div class="cats" id="market-cats"></div>
+  </div>
+  <div id="market-body"></div>
+</main>
+
+<!-- ====================== MY APPS ====================== -->
 <section class="screen" id="apps-screen" hidden>
   <header class="topbar">
     <button class="icon-btn" id="btn-apps-back" aria-label="Orqaga">
       <svg viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
     </button>
-    <div class="topbar-title static" id="apps-title">Ilovalarim</div>
+    <div style="flex:1;text-align:center;font-weight:600;font-size:15.5px" id="apps-title">Ilovalarim</div>
     <span class="icon-btn" style="visibility:hidden"></span>
   </header>
   <div class="apps-grid" id="apps-grid"></div>
@@ -71,6 +97,7 @@
 <!-- ====================== DRAWER ====================== -->
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" hidden>
+  <div class="drawer-brand"><img src="assets/mark.png" alt=""><b>Mini</b></div>
   <div class="drawer-head">
     <button class="new-chat" id="btn-new-chat">
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -96,7 +123,7 @@
   </div>
 </div>
 
-<!-- ====================== MINI-APP PLAYER ====================== -->
+<!-- ====================== PLAYER ====================== -->
 <div class="player" id="player" hidden>
   <div class="player-bar" id="player-bar">
     <button class="icon-btn" id="btn-player-close" aria-label="Yopish">

@@ -33,6 +33,7 @@ export function renderApps() {
     const menu = () => openAppMenu(app, {
       onOpen: () => openApp(app),
       onEdit: () => hooks.editApp?.(app),
+      onMarket: () => hooks.onMarket?.(app),
       onChanged: renderApps,
     });
 
@@ -59,6 +60,8 @@ export function openApp(app, { bare = false } = {}) {
   player.hidden = false;
   if (!bare && !reopening) pushHistory();
   player.classList.toggle('bare', bare);
+  // The chrome takes on the app's colour, so a running app feels like itself.
+  player.style.setProperty('--app-accent', app.color || 'transparent');
   $('#player-name').textContent = app.name || '';
 
   running = mount($('#player-stage'), app, {
@@ -82,6 +85,7 @@ export function openApp(app, { bare = false } = {}) {
     openAppMenu(real, {
       onOpen: () => openApp(real),
       onEdit: () => { closeApp(); hooks.editApp?.(real); },
+      onMarket: () => { closeApp(); hooks.onMarket?.(real); },
       onChanged: () => { closeApp(); renderApps(); },
     });
   };

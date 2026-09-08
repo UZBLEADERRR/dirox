@@ -42,6 +42,14 @@ export const TOOLS = [
   {
     type:'function',
     function:{
+      name:'delete_file',
+      description:'Keraksiz faylni o\'chirish.',
+      parameters:{ type:'object', properties:{ path:{ type:'string' } }, required:['path'] }
+    }
+  },
+  {
+    type:'function',
+    function:{
       name:'run_check',
       description:'Ilovani brauzerda ishga tushirib tekshirish: xatolar, tugmalarni bosish, joylashuv. Har o\'zgarishdan keyin chaqiring.',
       parameters:{ type:'object', properties:{} }
@@ -69,7 +77,7 @@ export const TOOLS = [
   },
 ];
 
-const MAX_RESULT = 2000;
+const MAX_RESULT = 6000;   // a real file has to come back whole to be patched
 const clip = s => (s.length > MAX_RESULT ? s.slice(0, MAX_RESULT) + `\n…(${s.length} belgidan qisqartirildi)` : s);
 
 /**
@@ -102,6 +110,16 @@ export async function runTool(name, args, ctx) {
       ctx.onStep?.({ kind:'edit', label:`${t('steps.edit')}: ${path}`, ok:true });
       ctx.onArtifact?.();
       return { text:`OK ${path} tuzatildi` };
+    }
+
+    case 'delete_file': {
+      const path = (args.path || '').replace(/^\.?\//, '');
+      if (path === 'index.html') return { text:'XATO: index.html o\'chirilmaydi.' };
+      if (p.files[path] == null) return { text:`XATO: ${path} yo'q.` };
+      delete p.files[path];
+      ctx.onStep?.({ kind:'edit', label:`O'chirildi: ${path}`, ok:true });
+      ctx.onArtifact?.();
+      return { text:`OK ${path} o'chirildi` };
     }
 
     case 'read_file': {

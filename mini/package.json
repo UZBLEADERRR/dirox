@@ -1,0 +1,14 @@
+{
+  "name": "mini",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cho'ntagingizdagi AI. O'zingizga ilova yasang, marketda ulashing.",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node test/run.mjs",
+    "icons": "node scripts/make-icons.mjs"
+  }
+}

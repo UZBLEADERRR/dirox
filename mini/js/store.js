@@ -18,7 +18,9 @@ const DEFAULT_ROLES = [
     prompt:'' },
   { id:'design',  emoji:'🎨', builtin:true, tools:true,
     name:{uz:'Dizayner',en:'Designer',ru:'Дизайнер'},
-    prompt:'Sen dizaynerisan. Interfeys, rang, tipografika va bo\'shliqqa alohida e\'tibor ber. Kam element, ko\'p havo, bitta urg\'u rangi.' },
+    prompt:'Dizayn birinchi o\'rinda. Har bir ekranni tipografika (aniq o\'lcham shkalasi), bo\'shliq (4px tarmoq), ' +
+           'ierarxiya va harakat orqali qur. Bitta urg\'u rangi, ko\'p havo, yumshoq soya, 16-24px radius. ' +
+           'Tungi va kunduzgi rejim ikkalasi ham chiroyli bo\'lsin.' },
   { id:'coder',   emoji:'⚡', builtin:true, tools:true,
     name:{uz:'Dasturchi',en:'Coder',ru:'Программист'},
     prompt:'Sen tajribali dasturchisan. Toza, sodda, ishlaydigan kod yoz. Ortiqcha izohsiz.' },
@@ -38,14 +40,19 @@ const DEFAULTS = {
     theme: 'system',
     temperature: 0.7,
     historyLimit: 24,         // messages kept in the request window
-    maxSteps: 14,             // agent tool-loop budget
+    maxSteps: 26,             // agent tool-loop budget
     installDismissed: false,
+    marketUrl: '',            // '' = same origin as this page
+    author: '',               // shown next to published apps
   },
   roles: [],                  // user-made roles only; builtins are merged in
   chats: [],
   apps: [],
   activeChatId: null,
   totals: { in:0, out:0, cost:0 },
+  deviceId: '',               // anonymous, local: enforces one publish a day
+  lastPublish: '',            // YYYY-MM-DD
+  tab: 'chat',
 };
 
 function load() {
@@ -121,7 +128,7 @@ export function touch(chat) { chat.updatedAt = Date.now(); save(); }
 
 /* ---------------- apps ---------------- */
 
-export function publishApp({ id, name, emoji, color, files, assets, deviceAccess }) {
+export function publishApp({ id, name, emoji, color, files, assets, deviceAccess, marketId }) {
   let app = id ? state.apps.find(a => a.id === id) : null;
   if (!app) {
     app = { id: id || uid(), createdAt: Date.now() };
@@ -133,6 +140,7 @@ export function publishApp({ id, name, emoji, color, files, assets, deviceAccess
     assets: structuredClone(assets || []),
     deviceAccess: !!deviceAccess,
     updatedAt: Date.now(),
+    ...(marketId ? { marketId } : {}),
   });
   save(true);
   return app;

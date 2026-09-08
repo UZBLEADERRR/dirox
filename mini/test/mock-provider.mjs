@@ -68,6 +68,16 @@ http.createServer((req, res) => {
   req.on('end', () => {
     let msgs = [];
     try { msgs = JSON.parse(body).messages || []; } catch {}
+    // The store reviewer asks for strict JSON and nothing else.
+    if (/moderatorisan/.test(msgs[0]?.content || '')) {
+      const asked = JSON.stringify(msgs).toLowerCase();
+      const reject = /reject-me/.test(asked);
+      return sse(res, textChunks(JSON.stringify(reject
+        ? { ok:false, score:1, note:'Ilova tugallanmagan.' }
+        : { ok:true, score:4, note:'Ishlaydi va foydali.', summary:'Oddiy kalkulyator.',
+            category:'asboblar', categoryName:'Asboblar', categoryIcon:'🧰', tags:['hisob','asbob'] })));
+    }
+
     const done = msgs.filter(m => m.role === 'tool').length;
     const usage = { choices:[{ delta:{} }], usage:{ prompt_tokens:120, completion_tokens:40 } };
     const first = msgs.find(m => m.role === 'user');

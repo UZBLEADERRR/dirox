@@ -4,7 +4,7 @@
  * lets every mini-app the user invents have a real home-screen icon.
  */
 
-export const PALETTE = ['#7c8cff','#ff7a59','#22c55e','#f59e0b','#ec4899','#06b6d4','#8b5cf6','#111114'];
+export const PALETTE = ['#E8171F','#0A0A0B','#F0A93B','#31C56B','#3B82F6','#8B5CF6','#EC4899','#0EA5A5'];
 
 export const EMOJIS = ('🧮 📝 ⏱ 📷 🎨 🎵 💪 💧 📚 🍳 💰 ✅ 🎯 🌤 🗓 🔦 🎲 🧠 🏃 🛒 ' +
   '📊 🔐 🌱 ⭐ 🔔 🧩 🚗 ✈️ 🐱 🍎 ☕ 🎮 📌 🔬 🧭 🪙 🕹 🎁 🩺 🧺').split(' ');

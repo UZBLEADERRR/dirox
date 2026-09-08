@@ -5,8 +5,9 @@ import { setLang, t } from './i18n.js';
 import { applyTheme, openSettings, openRolePicker } from './ui/sheets.js';
 import { initChat, renderChat, send, stop, attachFiles, addPending } from './ui/chat.js';
 import { initApps, renderApps, openApp, closeApp } from './ui/apps.js';
+import { initMarket, renderMarket, bindMarketControls, openSharedApp, openPublishToMarket } from './ui/market.js';
 import { openDrawer, closeDrawer, renderDrawer, startNewChat } from './ui/drawer.js';
-import { $, el, toast, openSheet, closeSheet, sheetOpen, readImage,
+import { $, $$, el, toast, openSheet, closeSheet, sheetOpen, readImage,
          pushHistory as push, popHistory as back, notePop, resetHistory } from './ui/dom.js';
 
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -20,7 +21,12 @@ window.__miniRender = () => { renderChat(); renderDrawer(); };
 setQuotaHandler(() => toast('Xotira to\'ldi. Eski chatlarni o\'chiring.', 4000));
 
 initChat({ openApp: (draft) => openApp(draft) });
+initMarket({
+  openApp: (app) => openApp(app),
+  goChat: () => setTab('chat'),
+});
 initApps({
+  onMarket: (app) => openPublishToMarket(app, { name:app.name, emoji:app.emoji, color:app.color }),
   /* "Edit" reopens the chat that built the app, or starts a fresh one seeded
      with its files so the agent can carry on from where it left off. */
   editApp(app) {
@@ -40,23 +46,42 @@ initApps({
   leaveBare() { showShell(); },
 });
 
+/* ------------------------------------------------------------------ tabs */
+
+function setTab(name) {
+  state.tab = name; save();
+  $('#tabs').dataset.on = name;
+  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  $('#view-chat').hidden   = name !== 'chat';
+  $('#composer').hidden    = name !== 'chat';
+  $('#view-market').hidden = name !== 'market';
+  scrollTo({ top: 0 });
+  if (name === 'market') renderMarket();
+}
+
 /* ------------------------------------------------------------- deep link */
 
-const deepAppId = new URLSearchParams(location.search).get('app');
+const params = new URLSearchParams(location.search);
+const deepAppId = params.get('app');      // a mini app pinned to the home screen
+const deepMarket = params.get('m');       // a shared market link
 
-function showShell() {
+function showShell(tab = state.tab || 'chat') {
   $('#boot').hidden = true;
   $('#topbar').hidden = false;
-  $('#chat').hidden = false;
-  $('#composer').hidden = false;
   renderChat();
   renderDrawer();
+  bindMarketControls();
+  setTab(tab);
 }
 
 if (deepAppId) {
   const app = getApp(deepAppId);
   if (app) { $('#boot').hidden = true; openApp(app, { bare:true }); resetHistory(); }
   else { history.replaceState(null, '', location.pathname); showShell(); }
+} else if (deepMarket) {
+  history.replaceState(null, '', location.pathname);
+  showShell('market');
+  openSharedApp(deepMarket);
 } else {
   showShell();
 }
@@ -91,6 +116,7 @@ $('#btn-settings').onclick = () => openSettings(() => window.__miniRender());
 $('#btn-apps').onclick = () => showApps(true);
 $('#btn-apps-back').onclick = () => { $('#apps-screen').hidden = true; back(); };
 $('#btn-role').onclick = () => openRolePicker(activeChat(), () => window.__miniRender());
+$$('#tabs button').forEach(b => { b.onclick = () => setTab(b.dataset.tab); });
 $('#sheet-scrim').onclick = () => closeSheet();
 $('#btn-player-close').onclick = () => { closeApp(); back(); };
 
@@ -132,19 +158,19 @@ if (!standalone && !deepAppId && !state.settings.installDismissed) {
     openSheet(close => [
       el('div', { class:'center', style:{ padding:'6px 0 14px' } },
         el('img', { src:'assets/icon-180.png', width:'72', height:'72', style:{ borderRadius:'20px' } })),
-      el('h3', { class:'center', text:t('install') }),
+      el('h3', { class:'center', text:t('installPwa') }),
       el('p', { class:'note', text:t('installSub') }),
       el('div', { class:'btn-row' },
         el('button', { class:'btn', text:t('later'), onClick:() => {
           state.settings.installDismissed = true; save(true); close();
         }}),
-        el('button', { class:'btn primary', text:t('install'), onClick:async () => {
+        el('button', { class:'btn primary', text:t('installPwa'), onClick:async () => {
           const p = window.__miniInstallPrompt;
           if (p) { p.prompt(); await p.userChoice.catch(() => {}); window.__miniInstallPrompt = null; close(); }
           else {
             close();
             openSheet(() => [
-              el('h3', { text:t('install') }),
+              el('h3', { text:t('installPwa') }),
               el('div', { class:'note', html: ios
                 ? `Safari'da pastdagi <b>Ulashish</b> tugmasini bosing → <b>«Bosh ekranga qo'shish»</b>.`
                 : `Brauzer menyusidan <b>«Ilovani o'rnatish»</b> ni tanlang.` }),

@@ -9,19 +9,18 @@
  *   node test/run.mjs                 (needs playwright available to import)
  */
 
-import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const WEB_PORT = 8899, API_PORT = 8900;
-const BASE = `http://127.0.0.1:${WEB_PORT}/index.html`;
+const ORIGIN = `http://127.0.0.1:${WEB_PORT}`;
+const BASE = ORIGIN + '/index.html';
 const API  = `http://127.0.0.1:${API_PORT}/v1`;
-
-const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.png':'image/png', '.svg':'image/svg+xml', '.webmanifest':'application/manifest+json' };
+const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-test-'));
 
 /* ------------------------------------------------------------- harness */
 
@@ -34,27 +33,31 @@ const group = name => console.log(`\n${name}`);
 
 const seed = (extra = {}) => ({
   settings: { lang:'uz', apiKey:'sk-mock', baseUrl:API, model:'mock/fast',
-              modelName:'Mock Fast', installDismissed:true, theme:'dark' },
+              modelName:'Mock Fast', installDismissed:true, theme:'dark', author:'Tester' },
   ...extra,
 });
 
+const marketApi = (p, opts) => fetch(ORIGIN + p, opts).then(r => r.json());
+
+/** Builds the scripted calculator through the UI and waits for the artifact. */
+async function buildApp(page, prompt = 'Menga kalkulyator yasab ber') {
+  await page.fill('#input', prompt);
+  await page.click('#btn-send');
+  await page.waitForSelector('.artifact', { timeout: 45000 });
+  await page.waitForTimeout(500);
+}
+
 /* --------------------------------------------------------------- setup */
 
-const web = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(ROOT, rel);
-  if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end('not found');
-  }
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
-}).listen(WEB_PORT);
+const web = spawn(process.execPath, [path.join(ROOT, 'server/server.js')],
+  { stdio:'ignore', env:{ ...process.env, PORT:String(WEB_PORT), MINI_DATA:DATA,
+                          MINI_ADMIN_TOKEN:'test-admin' } });
 
 const api = spawn(process.execPath, [path.join(ROOT, 'test/mock-provider.mjs')],
   { stdio:'ignore', env:{ ...process.env, MOCK_PORT:String(API_PORT) } });
 
-const done = () => { web.close(); api.kill(); };
-await new Promise(r => setTimeout(r, 600));
+const done = () => { web.kill(); api.kill(); fs.rmSync(DATA, { recursive:true, force:true }); };
+await new Promise(r => setTimeout(r, 900));
 
 let chromium, devices;
 try { ({ chromium, devices } = await import('playwright')); }
@@ -242,6 +245,95 @@ group('Orqaga tugmasi: har qatlam o\'z navbatida yopiladi');
   ok('drawer yopildi, ilovadan chiqib ketilmadi', !v.drawer && v.alive);
   ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
   await ctx.close();
+}
+
+/* ------------------------------------------------------------- 6. market */
+
+group('Market: tekshiruv, joylash, kunlik chegara');
+let publishedId = null;
+{
+  const { page, ctx, errs } = await newPage(seed());
+  await buildApp(page);
+
+  await page.click('.artifact .btn.dark');                 // "Marketga joylash"
+  await page.waitForTimeout(300);
+  ok('joylash oynasi ochildi', (await page.textContent('#sheet-body h3')).includes('Marketga'));
+
+  await page.click('#sheet-body .btn.primary');            // start the AI review
+  await page.waitForSelector('.verdict', { timeout: 30000 });
+  ok('AI tekshiruvi o\'tdi', await page.isVisible('.verdict.ok'));
+  ok('kategoriya aniqlandi', (await page.textContent('.verdict')).includes('Asboblar'));
+
+  await page.click('#sheet-body .btn.primary');            // submit
+  await page.waitForSelector('.note.ok', { timeout: 20000 });
+  ok('serverga joylandi', (await page.textContent('.note.ok')).includes('marketda'));
+
+  const cat = await marketApi('/api/market/index.json');
+  publishedId = cat.apps[0]?.id;
+  ok('katalogda paydo bo\'ldi', cat.apps.length === 1 && cat.apps[0].name === 'Kalkulyator',
+     JSON.stringify(cat.apps.map(a => a.name)));
+  ok('kategoriya yaratildi', cat.categories[0]?.id === 'asboblar', JSON.stringify(cat.categories));
+  ok('muallif saqlandi', cat.apps[0]?.author === 'Tester');
+
+  // second publish, same device, same day
+  await page.click('#sheet-body .btn.primary');            // closes the sheet
+  await page.waitForTimeout(300);
+  await page.click('.artifact .btn.dark');
+  await page.waitForTimeout(400);
+  ok('kunlik chegara ushlandi', (await page.textContent('#sheet-body')).includes('Kuniga bitta'));
+  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+group('Market: boshqa foydalanuvchi o\'rnatadi');
+{
+  const { page, ctx, errs } = await newPage(seed());
+  await page.click('#tab-market');
+  await page.waitForSelector('.mk-row', { timeout: 20000 });
+  ok('ro\'yxatda ko\'rinadi', (await page.textContent('.mk-row b')) === 'Kalkulyator');
+
+  await page.click('.mk-row .mk-get');                     // OLISH
+  await page.waitForTimeout(1500);
+  const apps = await page.evaluate(() => JSON.parse(localStorage['mini.v1']).apps);
+  ok('ilova o\'rnatildi', apps.length === 1 && apps[0].marketId === publishedId,
+     JSON.stringify(apps.map(a => a.marketId)));
+  ok('fayllar yuklandi', !!apps[0]?.files?.['index.html']);
+  ok('ekranga qo\'shish taklif qilindi', await page.isVisible('#sheet-wrap'));
+
+  await page.waitForTimeout(3400);            // counts are coalesced server-side
+  const cat = await marketApi('/api/market/index.json');
+  ok('o\'rnatish soni ortdi', cat.apps[0].installs >= 1, String(cat.apps[0].installs));
+  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+group('Market: ulashilgan havola va server tekshiruvi');
+{
+  const { page, ctx, errs } = await newPage(seed());
+  await page.goto(`${ORIGIN}/?m=${publishedId}`, { waitUntil:'networkidle' });
+  await page.waitForSelector('#sheet-body .stat-row', { timeout: 20000 });
+  ok('havola ilova sahifasini ochdi', (await page.textContent('#sheet-body h3')) === 'Kalkulyator');
+  ok('market ko\'rinishiga o\'tdi', await page.isVisible('#view-market'));
+  ok('manzil tozalandi', !page.url().includes('?m='));
+  ok('konsolda xato yo\'q', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+
+  const post = (body, device) => fetch(ORIGIN + '/api/market/submit', {
+    method:'POST', headers:{ 'Content-Type':'application/json', 'X-Mini-Device':device },
+    body: JSON.stringify(body) }).then(async r => ({ status:r.status, body: await r.json() }));
+
+  const good = { name:'Tashqi', emoji:'🧪', color:'#E8171F', review:{ ok:true, category:'test' },
+    files:{ 'index.html':'<!doctype html><html><body>' + 'x'.repeat(300) +
+      '<script src="https://cdn.example.com/a.js"><\/script></body></html>' } };
+  const r1 = await post(good, 'device-aaaaaaaa');
+  ok('tashqi skriptli ilova rad etildi', r1.status === 400 && /mustaqil/.test(r1.body.error), JSON.stringify(r1));
+
+  const r2 = await post({ ...good, files:{ 'index.html':'<html><body>hi</body></html>' } }, 'device-bbbbbbbb');
+  ok('bo\'sh ilova rad etildi', r2.status === 400, JSON.stringify(r2));
+
+  const r3 = await post({ ...good, review:{ ok:false },
+    files:{ 'index.html':'<!doctype html><html><body>' + 'y'.repeat(300) + '</body></html>' } }, 'device-cccccccc');
+  ok('tekshiruvsiz ilova rad etildi', r3.status === 400 && /tekshiruv/.test(r3.body.error), JSON.stringify(r3));
 }
 
 /* ------------------------------------------------------------- results */

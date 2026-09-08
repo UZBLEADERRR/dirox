@@ -1,10 +1,11 @@
 /** The chat screen: messages, the composer, and the agent turn it drives. */
 
 import { state, save, activeChat, touch, getRole, getApp, publishApp } from '../store.js';
-import { t } from '../i18n.js';
+import { t, currentLang } from '../i18n.js';
 import { md } from '../md.js';
 import { Agent } from '../agent.js';
 import { openPublish, openSettings } from './sheets.js';
+import { openPublishToMarket } from './market.js';
 import { $, el, toast, readImage, svg, ICON } from './dom.js';
 
 let agent = null, pending = [];         // pending = attached images for the next send
@@ -20,8 +21,9 @@ export function renderChat() {
   const box = $('#messages');
   box.innerHTML = '';
 
-  $('#chat-title').textContent = chat.title || t('newChat');
   $('#role-emoji').textContent = role.emoji;
+  $('#role-name').textContent =
+    typeof role.name === 'object' ? (role.name[currentLang()] || role.name.uz) : role.name;
   $('#input').placeholder = t('ask');
 
   if (!chat.messages.length) { box.append(emptyState(chat)); return; }
@@ -36,12 +38,14 @@ function emptyState(chat) {
   const s = state.settings;
   if (!s.apiKey) {
     return el('div', { class:'empty' },
+      el('img', { class:'empty-mark', src:'assets/mark.png', alt:'' }),
       el('h2', { text:t('noKeyTitle') }),
       el('p', { text:t('noKeySub') }),
       el('div', { class:'chips' },
-        el('button', { class:'chip', text:t('addKey'), onClick:() => openSettings(renderChat) })));
+        el('button', { class:'chip primary', text:t('addKey'), onClick:() => openSettings(renderChat) })));
   }
   return el('div', { class:'empty' },
+    el('img', { class:'empty-mark', src:'assets/mark.png', alt:'' }),
     el('h2', { text:t('emptyTitle') }),
     el('p', { text:t('emptySub') }),
     el('div', { class:'chips' }, ...t('ideas').map(idea =>
@@ -88,7 +92,10 @@ function artifactCard(chat) {
         id: chat.appId || 'draft', name, emoji, color, files:p.files, assets:p.assets,
         deviceAccess: app?.deviceAccess }) }),
       el('button', { class:'btn primary', text: app ? t('update') : t('publish'),
-        onClick:() => openPublish(p, app, saved => { chat.appId = saved.id; save(); renderChat(); }) })));
+        onClick:() => openPublish(p, app, saved => { chat.appId = saved.id; save(); renderChat(); }) })),
+    app ? el('div', { class:'artifact-actions', style:{ paddingTop:'0' } },
+      el('button', { class:'btn dark', text:t('marketPublish'),
+        onClick:() => openPublishToMarket(p, { name:app.name, emoji:app.emoji, color:app.color }) })) : null);
 }
 
 function scrollDown(instant) {

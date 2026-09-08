@@ -1,87 +1,120 @@
-# Mini
+<p align="center">
+  <img src="assets/mark.png" width="76" alt="Mini">
+</p>
 
-**Cho'ntagingizdagi AI. O'zingizga mini ilovalar yasang.**
+<h1 align="center">Mini</h1>
 
-Mini — telefon uchun yasalgan, juda sodda AI chat. Undan ilova so'raysiz — u
-yozadi, brauzerda ishga tushirib tekshiradi, xatolarini o'zi tuzatadi va tayyor
-ilovani telefoningiz ekraniga o'z nomi va belgisi bilan qo'shib beradi.
+<p align="center"><b>O'zingizga ilova yasang. Bir bosishda telefon ekraningizga.</b></p>
 
-Server yo'q. Ro'yxatdan o'tish yo'q. Ma'lumotlaringiz shu qurilmadan chiqmaydi.
-Siz o'zingizning API kalitingizni kiritasiz va so'rovlar to'g'ridan-to'g'ri
-o'zingiz tanlagan provayderga ketadi.
+---
 
-```
-mini/
-  index.html          bitta sahifa — butun ilova
-  app.css             dizayn (tungi/kunduzgi, safe-area, katta tugmalar)
-  sw.js               offline + har bir mini ilova uchun manifest
-  manifest.webmanifest
-  js/
-    store.js          localStorage: chatlar, ilovalar, sozlamalar
-    llm.js            OpenAI-shaklidagi streaming klient
-    agent.js          bir navbatning to'liq sikli
-    tools.js          agentning 6 ta vositasi
-    sandbox.js        mini ilova ishlaydigan izolyatsiya + o'z-o'zini test
-    icons.js          belgi chizish + ekranga qo'shish
-    md.js  i18n.js    markdown, uz/en/ru
-    ui/               chat, drawer, sheetlar, ilovalar ekrani
-```
+Mini — telefon uchun yasalgan AI. Undan ilova so'raysiz — u yozadi, brauzerda
+ishga tushirib tekshiradi, xatolarini o'zi tuzatadi va tayyor ilovani telefon
+ekraningizga o'z nomi va belgisi bilan qo'yadi. Yoqqan ilovangizni **Market**ga
+joylashingiz mumkin: uni AI ko'rib chiqadi, kategoriyaga ajratadi va har kim
+bir bosishda o'rnatib oladi.
+
+Ikkita ekran, bitta tugma bilan almashadi:
+
+| **Chat** | **Market** |
+| --- | --- |
+| AI bilan ilova yasaysiz | Odamlar yasagan ilovalarni o'rnatasiz |
+
+Foydalanuvchi o'z API kalitini kiritadi va istagan modelini tanlaydi. Chat,
+ilovalar va sozlamalar faqat o'sha telefonda — `localStorage`da — turadi.
+Serverga faqat market tegishli.
 
 ---
 
 ## Ishga tushirish
 
-Build yo'q, bog'liqlik yo'q. Shunchaki statik fayllarni bering:
-
 ```bash
 cd mini
-python3 -m http.server 8000        # yoki: npx serve .
+npm start                 # http://localhost:8080 — ilova ham, market ham
 ```
 
-`http://localhost:8000` ni oching. Ishlab chiqarish uchun ham xuddi shunday —
-`mini/` papkasini har qanday statik hostingga qo'ying:
+Boshqa hech narsa kerak emas: bog'liqlik yo'q, build yo'q, ma'lumotlar bazasi
+yo'q. Node 20+ yetarli.
 
-**nginx**
-```nginx
-server {
-  listen 443 ssl;
-  server_name mini.example.com;
-  root /var/www/mini;
-  location / { try_files $uri $uri/ /index.html; }
-  location = /sw.js { add_header Cache-Control "no-cache"; }
-}
+### Serverga qo'yish
+
+```bash
+MINI_DATA=/var/lib/mini PORT=8080 node server/server.js
 ```
 
-**Caddy**
-```
-mini.example.com {
-  root * /var/www/mini
-  try_files {path} /index.html
-  file_server
-}
-```
+Old tomonga nginx yoki Caddy qo'ying va HTTPS bering — servis ishchisi va
+«ekranga o'rnatish» faqat HTTPS'da ishlaydi.
 
-GitHub Pages, Netlify, Vercel, Cloudflare Pages — hammasi ishlaydi.
-Yagona shart: **HTTPS**, aks holda service worker va «ekranga o'rnatish»
-ishlamaydi (`localhost` bundan mustasno).
+| O'zgaruvchi | Ma'nosi |
+| --- | --- |
+| `PORT` | port (8080) |
+| `MINI_DATA` | ma'lumot papkasi (`mini/data`) |
+| `MINI_MAX_PER_DAY` | bir qurilmadan kuniga nechta ilova (1) |
+| `MINI_MAX_PER_IP` | bir IP dan kuniga nechta (20 — operator NAT uchun) |
+| `MINI_MODERATE` | `1` bo'lsa ilovalar admin tasdig'ini kutadi |
+| `MINI_ADMIN_TOKEN` | `/api/admin/*` ni yoqadi |
+
+Marketsiz, faqat statik holda ham ishlatsa bo'ladi — `mini/` papkasini
+GitHub Pages yoki istalgan statik hostingga qo'ying. U holda Market bo'limi
+bo'sh turadi (yoki Sozlamalarda boshqa market serverini ko'rsatasiz).
 
 ---
 
-## Foydalanuvchi nima qiladi
+## Serveringizga yuklama tushmaydi
 
-1. Saytga kiradi → «Ilovani ekranga o'rnatish» chiqadi. iPhone'da
-   *Ulashish → Bosh ekranga qo'shish*, Android'da bitta tugma.
-2. Sozlamalarga o'z API kalitini qo'yadi (OpenRouter, Groq, OpenAI yoki
-   `/chat/completions` gapiradigan istalgan manzil) va modelni tanlaydi.
-3. Rol tanlaydi: Ilova yasovchi, Dizayner, Dasturchi, Matn, Suhbat — yoki
-   o'zi yangi rol yaratadi.
-4. «Kalkulyator yasab ber» deydi. Agent yozadi, tekshiradi, tuzatadi, saqlaydi.
-5. Tayyor ilovani bosib ochadi yoki telefon ekraniga alohida belgi qilib
-   qo'shadi.
+Bu maxsus o'ylangan:
+
+- **Butun katalog — bitta fayl.** `/api/market/index.json` yozuv bo'lgandagina
+  qayta yig'iladi, xotirada gzip qilingan holda turadi va ETag bilan beriladi.
+  Ko'rish — bu bitta shartli GET.
+- **Har bir ilova — o'zgarmas manzil.** Ilova `id`si mazmun xeshidan
+  yasaladi, shuning uchun `Cache-Control: immutable`. Bir marta yuklangan
+  ilova qayta so'ralmaydi.
+- **AI tekshiruvi mijozda ketadi**, foydalanuvchining o'z kaliti bilan.
+  Moderatsiya sizga bir tiyin ham turmaydi.
+- **O'rnatish sanoqlari to'planib yoziladi**, har bosishda emas.
+- **Model bilan gaplashish serverdan o'tmaydi** — brauzer to'g'ridan-to'g'ri
+  OpenRouter bilan ishlaydi.
+
+Amalda origin ko'radigan yagona haqiqiy ish — kuniga bir necha marta
+sodir bo'ladigan «joylash». Oldiga CDN qo'ysangiz, qolgani nolga tushadi.
 
 ---
 
-## Agent qanday ishlaydi
+## Marketga qanday tushadi
+
+1. Foydalanuvchi ilovani yasaydi va **Marketga joylash** ni bosadi.
+2. **AI ko'rib chiqadi** (uning o'z modeli bilan): ishlaydimi, tugallanganmi,
+   foydalimi. Axlat, namuna, spam yoki nomaqbul narsa — rad etiladi.
+3. **Kategoriyani AI belgilaydi.** Mavjudlaridan mosini tanlaydi, mos kelmasa
+   yangisini yaratadi — «O'yinlar», «Asboblar», «Moliya» va hokazo.
+4. Server o'z tekshiruvini o'tkazadi va saqlaydi.
+5. Ilova ro'yxatga tushadi; har kim **OLISH** ni bosib o'rnatadi.
+
+**Kuniga bitta ilova.** Chegara qurilma bo'yicha, IP esa faqat toshqinga
+qarshi.
+
+Serverning o'z tekshiruvi (AI aytganiga ishonmaydi):
+
+- `index.html` bor va bo'sh emas
+- 400 KB dan katta emas, 20 tadan ko'p fayl emas
+- **tashqi skript, stil yoki tarmoq murojaati yo'q** — ilova mustaqil bo'lishi
+  shart. Shu qoida o'rnatilgan ilovani internetsiz ishlashini ta'minlaydi,
+  tekshiruvdan keyin mazmuni o'zgarib ketishiga yo'l qo'ymaydi va butun bir
+  turdagi hujumni yopadi.
+- takrorlangan ilova (bir xil mazmun) qabul qilinmaydi
+
+`MINI_MODERATE=1` qo'ysangiz, hammasi sizning tasdig'ingizni kutadi:
+
+```bash
+curl -H "X-Admin-Token: $MINI_ADMIN_TOKEN" http://localhost:8080/api/admin/pending
+curl -X POST -H "X-Admin-Token: $MINI_ADMIN_TOKEN" "http://localhost:8080/api/admin/publish?id=<id>"
+curl -X POST -H "X-Admin-Token: $MINI_ADMIN_TOKEN" "http://localhost:8080/api/admin/remove?id=<id>"
+```
+
+---
+
+## Agent
 
 Oltita vosita, boshqa hech narsa:
 
@@ -90,62 +123,66 @@ Oltita vosita, boshqa hech narsa:
 | `write_file` | fayl yozish |
 | `edit_file` | faylning bir parchasini almashtirish |
 | `read_file` | o'qish (yoki fayllar ro'yxati) |
+| `delete_file` | keraksiz faylni o'chirish |
 | `run_check` | ilovani ishga tushirib xato, tugma va joylashuvni tekshirish |
 | `screenshot` | ekran suratini olib, ko'rish |
 | `publish_app` | foydalanuvchi ekraniga qo'shish |
 
 `run_check` haqiqiy tekshiruv: ilova yashirin iframe'da ishga tushadi, JS
-xatolari, `console.error`, yuklanmagan rasmlar yig'iladi, ko'rinadigan
+xatolari, `console.error` va yuklanmagan rasmlar yig'iladi, ko'rinadigan
 tugmalar bosib ko'riladi, gorizontal scroll va ekrandan chiqib ketgan
-elementlar sanaladi. Natija ~1 KB matn bo'lib qaytadi — agent shuni o'qib
-tuzatadi.
+elementlar sanaladi. Natija ~1 KB matn bo'lib qaytadi.
 
-`screenshot` esa sahifani SVG `foreignObject` orqali JPEG'ga aylantiradi va
-modelga rasm sifatida qaytaradi. Kutubxona ham, tarmoq ham kerak emas.
+`screenshot` sahifani SVG `foreignObject` orqali JPEG'ga aylantiradi va
+modelga rasm sifatida qaytaradi — kutubxonasiz, tarmoqsiz.
+
+Agentga «tugallanmagan narsa qoldirma» degan qoida qattiq qo'yilgan: TODO yo'q,
+yarim ishlaydigan tugma yo'q, holat `localStorage`da saqlanadi, bo'sh va xato
+holatlari o'ylangan, dizayn mobil uchun (44px tugmalar, safe-area, tungi va
+kunduzgi rejim).
 
 ### Token tejash
 
-Bu ilova sizning pulingizga ishlaydi, shuning uchun tejamkorlik arxitekturaga
-kiritilgan:
+Bu ilova foydalanuvchining puliga ishlaydi, shuning uchun tejamkorlik
+arxitekturada:
 
-- **Vositalar natijasi qisqartiriladi** — `run_check` hisoboti 1600 belgigacha.
-- **Navbat tugagach vositalar tarixi o'chiriladi.** Xotira — bu fayllarning
-  o'zi; agentga kerak bo'lsa bitta faylni qayta o'qiydi.
+- **Vosita natijalari qisqartiriladi.**
+- **Navbat tugagach vositalar tarixi o'chiriladi.** Xotira — fayllarning o'zi;
+  kerak bo'lsa agent bitta faylni qayta o'qiydi.
 - **System promptda loyihaning o'zi emas, ro'yxati turadi:**
-  `index.html(2.1k) style.css(0.4k)`.
-- **Chat oynasi cheklangan** (sozlamalarda o'zgartiriladi, standart 24 xabar).
-- Kod chatga nusxalanmaydi — u artifact kartasida turadi.
+  `index.html(2.1k) app.js(4.3k)`.
+- **Chat oynasi cheklangan** (standart 24 xabar, sozlamalarda o'zgaradi).
+- Kod chatga nusxalanmaydi — artifact kartasida turadi.
 
 ---
 
 ## Mini ilovalar qanday ishlaydi
 
-Har bir ilova `sandbox="allow-scripts"` bo'lgan iframe ichida ishlaydi. Bu
-uni **opaque origin**ga tushiradi: ilova asosiy sahifaga ham, sizning API
-kalitingizga ham yeta olmaydi.
+Har bir ilova `sandbox="allow-scripts"` bo'lgan iframe ichida ishlaydi. Bu uni
+**opaque origin**ga tushiradi: ilova asosiy sahifaga ham, API kalitingizga ham
+yeta olmaydi.
 
-Buning narxi — iframe ichida `localStorage` ishlamaydi. Shuning uchun ilovaga
-o'rnini bosuvchi qo'yiladi: sinxron, xotiradagi `Storage`, host tomonidan
-to'ldiriladi va `postMessage` orqali qaytib saqlanadi. Ilova oddiygina
+Buning narxi — iframe ichida `localStorage` ishlamaydi. Shuning uchun o'rnini
+bosuvchi qo'yiladi: sinxron, xotiradagi `Storage`, host tomonidan to'ldiriladi
+va `postMessage` orqali qaytib saqlanadi. Ilova oddiygina
 `localStorage.setItem(...)` yozadi va u haqiqatan saqlanadi —
-`mini.appdata.<ilova-id>` kalitida, faqat o'sha ilovaga tegishli.
+`mini.appdata.<ilova-id>` ostida, faqat o'sha ilovaga tegishli.
 
-Ba'zi brauzerlarda (Safari) `localStorage` ni almashtirib bo'lmaydi, shuning
-uchun `compose()` har bir skript ichidagi `localStorage` identifikatorini
-`__miniLS` ga almashtiradi. Sahifa matnidagi «localStorage» so'ziga tegilmaydi.
+Safari'da `localStorage` ni almashtirib bo'lmaydi, shuning uchun `compose()`
+har bir skript ichidagi `localStorage` identifikatorini `__miniLS` ga
+almashtiradi. Sahifa matnidagi «localStorage» so'ziga tegilmaydi.
 
 ### Kamera
 
 Sandbox ichida `getUserMedia` ishlamaydi — bu origin bilan bog'liq cheklov.
-Shuning uchun agent kamera kerak bo'lganda
+Agent kamera kerak bo'lganda
 `<input type="file" accept="image/*" capture="environment">` ishlatadi; u
 sandboxda mukammal ishlaydi va iPhone'da to'g'ridan-to'g'ri kamerani ochadi.
 
-Agar sizga haqiqatan `getUserMedia` kerak bo'lsa, ilova sozlamasida
-«Kamera va mikrofon» ni yoqishingiz mumkin. **Diqqat:** bu iframe'ga
-`allow-same-origin` beradi, ya'ni o'sha ilova sizning API kalitingizni o'qiy
-oladi. Ilova ishonchli bo'lsagina yoqing — ilova buni ochiq ogohlantirish
-bilan so'raydi.
+Haqiqiy `getUserMedia` kerak bo'lsa, o'z ilovangiz sozlamasida «Kamera va
+mikrofon» ni yoqasiz. **Diqqat:** bu iframe'ga `allow-same-origin` beradi,
+ya'ni o'sha ilova API kalitingizni o'qiy oladi — ilova buni ochiq ogohlantirish
+bilan so'raydi. **Marketdan o'rnatilgan ilovalarga bu hech qachon berilmaydi.**
 
 ### Ekranga qo'shish
 
@@ -163,52 +200,46 @@ ekranda ochiladi.
 
 ## Xavfsizlik
 
-- API kalit faqat `localStorage`da, faqat shu qurilmada. Hech qaerga
+- API kalit faqat `localStorage`da, faqat shu qurilmada. Serverga hech qachon
   yuborilmaydi — faqat siz ko'rsatgan API manziliga.
-- Mini ilovalar opaque originda; kalitga ham, boshqa ilovalarning
-  ma'lumotiga ham yeta olmaydi (yuqoridagi «Kamera» bandi bundan mustasno).
-- Ilova ma'lumoti har biriga alohida `mini.appdata.<id>` ostida.
+- Mini ilovalar opaque originda; kalitga ham, boshqa ilovaning ma'lumotiga ham
+  yeta olmaydi.
+- Marketdagi ilovalar mustaqil bo'lishi shart — tashqi kod yuklay olmaydi.
 - Loyihada tashqi bog'liqlik yo'q — CDN ham, tracker ham, analitika ham.
 
 ---
 
 ## Sozlash
 
-`js/i18n.js` — tillar (uz, en, ru). Yangi til qo'shish uchun jadvalga bitta
-obyekt qo'shing.
-
-`js/store.js` → `DEFAULT_ROLES` — tayyor rollar.
-
-`js/agent.js` → `BUILDER_PROMPT` — agentning asosiy ko'rsatmasi.
-
-`app.css` → `:root` — ranglar, radius, tap o'lchami. Bitta urg'u rangi
-(`--accent`) butun ilovani boshqaradi.
-
-Belgilarni qayta chizish uchun:
-
-```bash
-python3 scripts/gen-mini-icons.py
-```
+| Fayl | Nima |
+| --- | --- |
+| `app.css` → `:root` | ranglar, radius, tap o'lchami |
+| `js/i18n.js` | tillar (uz, en, ru) |
+| `js/store.js` → `DEFAULT_ROLES` | tayyor rollar |
+| `js/agent.js` → `BUILDER_PROMPT` | agentning asosiy ko'rsatmasi |
+| `js/market.js` → `REVIEW_PROMPT` | market moderatorining ko'rsatmasi |
+| `assets/brand/logo-source.png` | logo; keyin `npm run icons` |
 
 ---
 
 ## Testlar
 
-Eng nozik joylar — sandbox, service worker va orqaga tugmasi — faqat haqiqiy
-brauzerda sinaladi. Shuning uchun testlar Chromium'ni haydaydi va pullik API
-o'rniga `test/mock-provider.mjs` bilan gaplashadi:
+Eng nozik joylar — sandbox, service worker, orqaga tugmasi va market —
+faqat haqiqiy brauzerda sinaladi. Testlar Chromium'ni haydaydi, o'z serverini
+ko'taradi va pullik API o'rniga `test/mock-provider.mjs` bilan gaplashadi:
 
 ```bash
 npx playwright install chromium     # bir marta
-node test/run.mjs
+npm test
 ```
 
-Nimalar tekshiriladi: agentning to'liq sikli (so'rov → fayl → tekshiruv →
-ekrandagi ilova), yasalgan ilovaning haqiqatan ishlashi va ma'lumot saqlashi,
-sandboxdagi CSS/JS/rasm birlashtirish va identifikator almashtirish, siniq
-ilovadagi xatoni topish, ekran surati, suratning modelga qaytishi, har bir
-ilova uchun o'rnatiladigan manifest, va orqaga tugmasining har qatlamni
-navbat bilan yopishi.
+Tekshiriladi: agentning to'liq sikli (so'rov → fayl → tekshiruv → ekrandagi
+ilova), yasalgan ilovaning haqiqatan ishlashi va ma'lumot saqlashi, sandboxdagi
+birlashtirish va identifikator almashtirish, siniq ilovadagi xatoni topish,
+ekran surati, suratning modelga qaytishi, har bir ilova uchun o'rnatiladigan
+manifest, orqaga tugmasi, va marketning to'liq yo'li — AI tekshiruvi,
+joylash, kunlik chegara, boshqa foydalanuvchining o'rnatishi, ulashilgan
+havola, server validatsiyasi.
 
 ---
 
@@ -221,26 +252,29 @@ MIT — [LICENSE](LICENSE).
 <details>
 <summary><b>English</b></summary>
 
-Mini is a mobile-first AI chat that builds you small apps. Ask for a
-calculator; the agent writes it, runs it in a hidden sandbox, reads back the
-errors, fixes them, and pins the finished app to your phone's home screen with
-its own name and icon.
+Mini is a mobile-first AI that builds you small apps. Ask for a calculator; the
+agent writes it, runs it in a hidden sandbox, reads back its own errors, fixes
+them, and pins the finished app to your phone's home screen with its own name
+and icon. Publish it to the **Market** and the AI reviews it, files it under a
+category (inventing one if none fits), and anyone can install it in one tap —
+one publish per person per day.
 
-No server, no accounts, no build step — static files and `localStorage`. You
-bring your own API key (OpenRouter by default, or anything that speaks
-`/chat/completions`) and pick any model.
+No accounts, no build step, no database. Bring your own API key, pick any
+model; chats and apps live in `localStorage` on your phone.
 
-Serve the `mini/` folder over HTTPS and it works: install prompt on Android,
-Add to Home Screen on iOS, offline shell via service worker.
+The server is deliberately tiny. The whole catalogue is one gzipped JSON blob
+rebuilt on write and served with an ETag; each app bundle is addressed by a
+content hash and cached forever; review runs on the submitter's own model;
+install counts are batched. Model traffic never touches the origin at all.
 
-Generated apps run on an opaque origin, so they cannot read your API key. A
-storage shim gives them a working `localStorage` bridged back to the host and
-namespaced per app. Camera work uses `<input capture>`, which the sandbox
-allows; real `getUserMedia` is an explicit, warned opt-in per app.
+Market apps must be self-contained — no external scripts, styles or network
+calls — which keeps them working offline and stops a reviewed app from
+changing under its users.
 
-Token economy is a design constraint: tool output is clipped, a turn's tool
-traffic is discarded once the turn ends, the system prompt carries a file
-inventory rather than the files, and the request window is bounded.
+```bash
+cd mini && npm start        # app + market on :8080
+npm test                    # 55 checks in a real Chromium
+```
 
 MIT licensed.
 </details>

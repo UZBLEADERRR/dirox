@@ -54,6 +54,20 @@ export function openSettings(afterChange) {
           el('small', { text:s.modelName || s.model || t('chooseModel') })),
         svg('<path d="M9 6l6 6-6 6"/>', 'class="tick"')),
 
+      el('h4', { text:t('market') }),
+      (() => {
+        const mk = el('input', { type:'url', value:s.marketUrl || '', placeholder:location.origin,
+          autocapitalize:'off', spellcheck:'false' });
+        mk.addEventListener('change', () => { s.marketUrl = mk.value.trim(); save(); });
+        return field(t('marketUrl'), mk,
+          'Bo\'sh qoldirsangiz shu saytning o\'zi ishlatiladi. O\'z serveringizni qo\'ysangiz — market o\'shandan o\'qiydi.');
+      })(),
+      (() => {
+        const au = el('input', { value:s.author || '', placeholder:'anonim', maxlength:'24' });
+        au.addEventListener('input', () => { s.author = au.value.trim(); save(); });
+        return field(t('author'), au);
+      })(),
+
       el('h4', { text:t('roles') }),
       ...allRoles().map(r => el('button', { class:'list-item', onClick:() => openRoleEditor(r, rerender) },
         el('span', { class:'em', text:r.emoji }),
@@ -307,7 +321,7 @@ export function openCode(files) {
 }
 
 /** `draft` = not published yet, so there is nothing to share, pin or delete. */
-export function openAppMenu(app, { onOpen, onEdit, onChanged, draft = false } = {}) {
+export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, draft = false } = {}) {
   if (draft) return openSheet(() => [
     el('div', { class:'center', style:{ padding:'4px 0 14px' } },
       el('div', { class:'app-ico', style:{ background:app.color || '#7c8cff', margin:'0 auto' },
@@ -315,6 +329,9 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, draft = false } = 
       el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name || 'Ilova' })),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
       el('span', { class:'em', text:'{ }' }), el('span', { class:'txt' }, el('b', { text:t('code') }))),
+    el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
+      el('span', { class:'em', text:'🚀' }), el('span', { class:'txt' },
+        el('b', { text:t('marketPublish') }), el('small', { text:t('marketHow').slice(0, 52) + '…' }))),
     el('div', { class:'note', style:{ marginTop:'10px' },
       text:'Bu ilova hali saqlanmagan. Chatdagi kartadan «Ilova qilib saqlash» ni bosing.' }),
   ]);
@@ -331,6 +348,9 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, draft = false } = 
       el('span', { class:'em', text:'📲' }), el('span', { class:'txt' }, el('b', { text:t('addToHome') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
       el('span', { class:'em', text:'{ }' }), el('span', { class:'txt' }, el('b', { text:t('code') }))),
+    el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
+      el('span', { class:'em', text:'🚀' }), el('span', { class:'txt' },
+        el('b', { text:t('marketPublish') }), el('small', { text:t('marketHow').slice(0, 52) + '…' }))),
     el('button', { class:'list-item', onClick:async () => {
       const url = `${location.origin}${location.pathname}?app=${app.id}`;
       try { await navigator.share({ title:app.name, url }); }

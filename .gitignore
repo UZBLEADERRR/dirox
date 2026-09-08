@@ -7,3 +7,5 @@ workspaces/
 .cache/
 coverage/
 mini/test/last-request.json
+mini/data/
+mini/node_modules/
