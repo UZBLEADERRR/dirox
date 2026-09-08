@@ -4,10 +4,12 @@ import { state, save, allRoles, uid, storageBytes, deleteApp, publishApp } from 
 import { t } from '../i18n.js';
 import { listModels } from '../llm.js';
 import { PALETTE, EMOJIS, iconDataUrl, applyAppIdentity } from '../icons.js';
-import { $, el, openSheet, closeSheet, confirmSheet, switchRow, field, toast, fmtBytes, ICON, svg } from './dom.js';
+import { $, el, openSheet, closeSheet, confirmSheet, switchRow, field, toast, fmtBytes,
+         ICON, svg, iconTile } from './dom.js';
 
 const PROVIDERS = [
   ['OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
+  ['Gemini',     'https://generativelanguage.googleapis.com/v1beta/openai', 'https://aistudio.google.com/apikey'],
   ['Groq',       'https://api.groq.com/openai/v1', 'https://console.groq.com/keys'],
   ['OpenAI',     'https://api.openai.com/v1', 'https://platform.openai.com/api-keys'],
   ['Other',      '', ''],
@@ -31,9 +33,9 @@ export function openSettings(afterChange) {
     base.addEventListener('change', () => { s.baseUrl = base.value.trim(); save(); });
 
     const provider = providerOf(s.baseUrl);
-    const provRow = el('div', { class:'seg' }, ...PROVIDERS.map(p =>
-      el('button', { class: p === provider ? 'on' : '', text:p[0], onClick:() => {
-        if (p[1]) { s.baseUrl = p[1]; save(); }
+    const provRow = el('div', { class:'chips left' }, ...PROVIDERS.map(p =>
+      el('button', { class:`chip sm ${p === provider ? 'on' : ''}`, text:p[0], onClick:() => {
+        if (p[1]) { s.baseUrl = p[1]; modelCache = null; save(); }
         rerender();
       }})));
 
@@ -48,7 +50,7 @@ export function openSettings(afterChange) {
         : 'The key stays on this phone only.'),
       field(t('baseUrl'), base),
       el('button', { class:'list-item', onClick:() => openModels(afterChange) },
-        el('span', { class:'em', text:'🧠' }),
+        iconTile(ICON.sparkle),
         el('span', { class:'txt' },
           el('b', { text:t('model') }),
           el('small', { text:s.modelName || s.model || t('chooseModel') })),
@@ -69,7 +71,7 @@ export function openSettings(afterChange) {
           el('b', { text: r.name }),
           el('small', { text: r.tools ? t('roleTools') : (r.prompt || '').slice(0, 48) })))),
       el('button', { class:'list-item', onClick:() => openRoleEditor(null, rerender) },
-        el('span', { class:'em', text:'＋' }),
+        iconTile(ICON.plus),
         el('span', { class:'txt' }, el('b', { text:t('newRole') }))),
 
       el('h4', { text:t('theme') }),
@@ -113,59 +115,90 @@ function sliderRow(label, value, min, max, step, onChange) {
 
 let modelCache = null;
 
+/**
+ * The model picker.
+ *
+ * Hundreds of models arrive in one list, so the work is narrowing: a search
+ * that filters as you type, three filters that cover what people actually
+ * choose on (free, cheap, can see pictures), and rows grouped by vendor so a
+ * familiar name is findable without knowing its exact id.
+ */
 export function openModels(afterChange) {
   const s = state.settings;
+  let filter = 'all';
+
   openSheet(() => {
-    const search = el('input', { type:'search', placeholder:t('searchModel') });
+    const search = el('input', { type:'search', placeholder:t('searchModel'),
+      autocapitalize:'off', spellcheck:'false' });
     const list = el('div');
-    const wrap = el('div', {},
-      el('h3', { text:t('chooseModel') }),
-      el('div', { class:'model-search' }, search),
-      list);
+    const chips = el('div', { class:'chips left', style:{ marginBottom:'10px' } });
+    const head = el('div', { class:'model-search' },
+      el('div', { class:'search' }, svg(ICON.search), search), chips);
 
     const manual = () => {
-      const inp = el('input', { value:s.model, placeholder:'masalan: openai/gpt-4o-mini' });
+      const inp = el('input', { value:s.model, placeholder:'e.g. openai/gpt-4o-mini' });
       inp.addEventListener('change', () => {
-        s.model = inp.value.trim(); s.modelName = s.model; save(); afterChange?.(); toast(t('done'));
+        s.model = inp.value.trim(); s.modelName = s.model; save(true); afterChange?.(); toast(t('done'));
       });
-      return field('Model ID (qo\'lda)', inp);
+      return field('Model id (by hand)', inp);
     };
 
-    const render = (rows) => {
+    const FILTERS = [['all', 'All'], ['free', 'Free'], ['cheap', 'Under $1/M'], ['vision', 'Sees images']];
+
+    const render = () => {
+      const rows = modelCache || [];
+      chips.innerHTML = '';
+      for (const [id, label] of FILTERS) {
+        chips.append(el('button', { class:`chip sm ${filter === id ? 'on' : ''}`, text:label,
+          onClick:() => { filter = id; render(); } }));
+      }
+
       const q = search.value.toLowerCase().trim();
-      const shown = rows.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
-                        .slice(0, 120);
+      const shown = rows.filter(m =>
+        (!q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)) &&
+        (filter !== 'free'   || m.free) &&
+        (filter !== 'cheap'  || m.free || (m.priceIn && m.priceIn <= 1)) &&
+        (filter !== 'vision' || m.vision)).slice(0, 140);
+
       list.innerHTML = '';
-      if (!shown.length) list.append(el('div', { class:'note', text:t('noModels') }));
+      if (!shown.length) { list.append(el('div', { class:'note', text:t('noModels') })); return; }
+
+      let vendor = null;
       for (const m of shown) {
-        const price = m.free ? 'bepul'
-          : m.priceIn ? `$${m.priceIn.toFixed(2)}/$${m.priceOut.toFixed(2)} 1M` : '';
+        if (m.vendor !== vendor) {
+          vendor = m.vendor;
+          list.append(el('div', { class:'chat-group', text:vendor }));
+        }
+        const price = m.free ? 'free'
+          : m.priceIn ? `$${m.priceIn < 1 ? m.priceIn.toFixed(2) : m.priceIn.toFixed(1)} in · $${m.priceOut.toFixed(m.priceOut < 1 ? 2 : 1)} out per 1M`
+          : '';
         list.append(el('button', { class:`list-item ${m.id === s.model ? 'sel' : ''}`, onClick:() => {
           s.model = m.id; s.modelName = m.name; save(true); afterChange?.(); closeSheet(); toast(m.name);
         }},
-          el('span', { class:'em', text:m.vision ? '👁' : '🧠' }),
+          iconTile(m.vision ? ICON.image : ICON.sparkle, m.free ? 'red' : ''),
           el('span', { class:'txt' },
-            el('b', { text:m.name }),
-            el('small', { text:[m.id, price, m.ctx ? `${Math.round(m.ctx/1000)}k` : ''].filter(Boolean).join(' · ') })),
+            el('b', { text:m.name.replace(/^[^:]+:\s*/, '') }),
+            el('small', { text:[price, m.ctx ? `${Math.round(m.ctx / 1000)}k context` : '']
+              .filter(Boolean).join(' · ') })),
           m.id === s.model ? svg(ICON.check, 'class="tick"') : null));
       }
     };
 
-    search.addEventListener('input', () => modelCache && render(modelCache));
+    search.addEventListener('input', () => modelCache && render());
 
     (async () => {
-      if (modelCache) return render(modelCache);
-      list.append(el('div', { class:'note', text:'Yuklanmoqda…' }));
+      if (modelCache) return render();
+      list.append(el('div', { class:'center', style:{ padding:'30px 0' } }, el('span', { class:'spinner' })));
       try {
         modelCache = await listModels(s);
-        render(modelCache);
+        render();
       } catch (e) {
         list.innerHTML = '';
         list.append(el('div', { class:'note warn', text:e.message }), manual());
       }
     })();
 
-    return wrap;
+    return [el('h3', { text:t('chooseModel') }), head, list];
   });
 }
 
@@ -183,7 +216,7 @@ export function openRolePicker(chat, onPick) {
         el('small', { text: r.tools ? t('roleToolsSub') : (r.prompt || '').slice(0, 44) })),
       r.id === chat.roleId ? svg(ICON.check, 'class="tick"') : null)),
     el('button', { class:'list-item', onClick:() => openRoleEditor(null, () => openRolePicker(chat, onPick)) },
-      el('span', { class:'em', text:'＋' }),
+      iconTile(ICON.plus),
       el('span', { class:'txt' }, el('b', { text:t('newRole') }))),
   ]);
 }
@@ -314,16 +347,13 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint,
     el('div', { class:'center', style:{ padding:'4px 0 14px' } },
       el('div', { class:'app-ico', style:{ background:app.color || '#7c8cff', margin:'0 auto' },
         text:app.emoji || '📱' }),
-      el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name || 'Ilova' })),
+      el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name || 'App' })),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onPrint?.(); } },
-      el('span', { class:'em', text:'🖨' }), el('span', { class:'txt' }, el('b', { text:t('print') }))),
+      iconTile(ICON.printer), el('span', { class:'txt' }, el('b', { text:t('print') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
-      el('span', { class:'em', text:'{ }' }), el('span', { class:'txt' }, el('b', { text:t('code') }))),
-    el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
-      el('span', { class:'em', text:'🚀' }), el('span', { class:'txt' },
-        el('b', { text:t('marketPublish') }), el('small', { text:t('marketHow').slice(0, 52) + '…' }))),
+      iconTile(ICON.code), el('span', { class:'txt' }, el('b', { text:t('code') }))),
     el('div', { class:'note', style:{ marginTop:'10px' },
-      text:'Bu ilova hali saqlanmagan. Chatdagi kartadan «Ilova qilib saqlash» ni bosing.' }),
+      text:'Not saved yet. Use “Save as app” on the card in the chat.' }),
   ]);
 
   openSheet(() => [
@@ -331,66 +361,102 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint,
       el('div', { class:'app-ico', style:{ background:app.color, margin:'0 auto' }, text:app.emoji }),
       el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name })),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onOpen?.(); } },
-      el('span', { class:'em', text:'▶️' }), el('span', { class:'txt' }, el('b', { text:t('open') }))),
+      iconTile(ICON.play), el('span', { class:'txt' }, el('b', { text:t('open') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onEdit?.(); } },
-      el('span', { class:'em', text:'✏️' }), el('span', { class:'txt' }, el('b', { text:t('edit') }))),
+      iconTile(ICON.pencil), el('span', { class:'txt' }, el('b', { text:t('edit') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openAddToHome(app); } },
-      el('span', { class:'em', text:'📲' }), el('span', { class:'txt' }, el('b', { text:t('addToHome') }))),
+      iconTile(ICON.download, 'red'), el('span', { class:'txt' }, el('b', { text:t('addToHome') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onPrint?.(); } },
-      el('span', { class:'em', text:'🖨' }), el('span', { class:'txt' }, el('b', { text:t('print') }))),
+      iconTile(ICON.printer), el('span', { class:'txt' }, el('b', { text:t('print') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
-      el('span', { class:'em', text:'{ }' }), el('span', { class:'txt' }, el('b', { text:t('code') }))),
+      iconTile(ICON.code), el('span', { class:'txt' }, el('b', { text:t('code') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
-      el('span', { class:'em', text:'🚀' }), el('span', { class:'txt' },
-        el('b', { text:t('marketPublish') }), el('small', { text:t('marketHow').slice(0, 52) + '…' }))),
+      iconTile(ICON.rocket, 'red'), el('span', { class:'txt' },
+        el('b', { text:t('marketPublish') }), el('small', { text:'Let others install it' }))),
     el('button', { class:'list-item', onClick:async () => {
       const url = `${location.origin}${location.pathname}?app=${app.id}`;
       try { await navigator.share({ title:app.name, url }); }
       catch { await navigator.clipboard?.writeText(url); toast(t('copied')); }
       closeSheet();
-    }}, el('span', { class:'em', text:'🔗' }), el('span', { class:'txt' }, el('b', { text:t('share') }))),
+    }}, iconTile(ICON.link), el('span', { class:'txt' }, el('b', { text:t('share') }))),
     el('button', { class:'list-item', onClick:async () => {
       closeSheet();
       if (await confirmSheet({ title:t('confirmDelete'), text:app.name, ok:t('delete') })) {
         deleteApp(app.id); onChanged?.();
       }
-    }}, el('span', { class:'em', text:'🗑' }), el('span', { class:'txt' },
-        el('b', { class:'', text:t('delete'), style:{ color:'var(--danger)' } }))),
+    }}, iconTile(ICON.trash, 'danger'), el('span', { class:'txt' },
+        el('b', { text:t('delete'), style:{ color:'var(--danger)' } }))),
   ]);
 }
 
-/** iOS has no install API; Android does. Both end up with a real icon. */
+/**
+ * Getting one mini app onto the phone's home screen.
+ *
+ * There is no API that adds a second app: `beforeinstallprompt` fires once,
+ * for the page's original manifest, and never again after it is swapped. So
+ * this hands the browser the right manifest and then says plainly which menu
+ * item to use — and, from inside an already-installed app where that menu does
+ * not exist at all, says to open the link in a browser first and offers it.
+ */
 export function openAddToHome(app) {
-  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  const ua = navigator.userAgent;
+  const ios = /iP(hone|ad|od)/.test(ua) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const url = `${location.origin}${location.pathname}?app=${app.id}`;
+
+  const copyRow = () => el('button', { class:'btn', onClick:async () => {
+    try { await navigator.clipboard.writeText(url); toast(t('copied')); }
+    catch { toast(url); }
+  }}, svg(ICON.link), 'Copy link');
 
   openSheet(close => {
     const box = el('div');
+
     (async () => {
-      await applyAppIdentity(app);
+      await applyAppIdentity(app);          // the browser menu uses this manifest
       box.innerHTML = '';
+
+      if (standalone) {
+        box.append(
+          el('div', { class:'note warn',
+            text:'You are inside the installed app, where the browser has no “add to home screen” menu. Open this link in Chrome or Safari, then add it from there.' }),
+          el('div', { class:'btn-row' },
+            copyRow(),
+            el('button', { class:'btn primary', onClick:() => { window.open(url, '_blank'); close(); } },
+              svg(ICON.external), 'Open in browser')));
+        return;
+      }
+
       const prompt = window.__miniInstallPrompt;
       if (!ios && prompt) {
-        box.append(el('button', { class:'btn primary', text:t('addToHome'), onClick:async () => {
+        box.append(el('button', { class:'btn primary', onClick:async () => {
           prompt.prompt();
           await prompt.userChoice.catch(() => {});
           window.__miniInstallPrompt = null;
           close();
-        }}));
-      } else {
-        box.append(el('div', { class:'note', html: ios
-          ? `In Safari, tap <b>Share</b> → <b>Add to Home Screen</b>. It is added as <b>${app.name}</b> with its own icon.`
-          : `Choose <b>Add to Home screen</b> from the browser menu.` }));
+        }}, svg(ICON.download), t('addToHome')));
+        return;
       }
+
+      box.append(
+        el('div', { class:'note', html: ios
+          ? 'Tap <b>Share</b> at the bottom of Safari, then <b>Add to Home Screen</b>. ' +
+            `It is added as <b>${app.name}</b> with its own icon.`
+          : 'Open the browser menu (<b>⋮</b>, top right) and choose <b>Add to Home screen</b>. ' +
+            `It is added as <b>${app.name}</b> with its own icon.` }),
+        el('div', { class:'btn-row' }, copyRow()));
     })();
+
     return [
       el('h3', { text:t('addToHome') }),
       el('div', { class:'center', style:{ padding:'4px 0 16px' } },
-        el('img', { src:iconDataUrl(app.emoji, app.color, 192), width:'64', height:'64',
-          style:{ borderRadius:'16px' } })),
+        el('img', { src:iconDataUrl(app.emoji, app.color, 192, app.iconImage), width:'72', height:'72',
+          style:{ borderRadius:'19px' } }),
+        el('div', { style:{ marginTop:'9px', fontWeight:600 }, text:app.name })),
       box,
       el('div', { class:'note', style:{ marginTop:'12px' },
-        text:'Once added, it opens full screen with its own icon.' }),
+        text:'Once added it opens full screen, with its own icon, and works offline.' }),
     ];
   });
 }

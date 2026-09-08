@@ -235,12 +235,15 @@ export async function openPublishToMarket(project, meta) {
       box.innerHTML = '';
       box.append(el('div', { class:'note' },
         el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' } },
-          el('span', { class:'spinner' }), el('span', { text:t('reviewing') }))));
+          el('span', { class:'spinner' }), el('span', { class:'rv-label', text:t('reviewing') }))));
 
       let review;
       try {
         const cats = (data?.categories || (await api.loadCatalogue().catch(() => null))?.categories) || [];
-        review = await api.reviewApp(project, meta, cats);
+        review = await api.reviewApp(project, meta, cats, phase => {
+          const label = phase === 'running' ? 'Running your app…' : t('reviewing');
+          box.querySelector('.rv-label') && (box.querySelector('.rv-label').textContent = label);
+        });
       } catch (e) {
         box.innerHTML = '';
         box.append(el('div', { class:'note warn', text:`${t('error')}: ${e.message}` }));

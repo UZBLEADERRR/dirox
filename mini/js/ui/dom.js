@@ -18,6 +18,11 @@ export function el(tag, props = {}, ...kids) {
   return n;
 }
 
+/** A list-row icon: the mark in a soft tile, instead of a stock emoji. */
+export function iconTile(path, tone = '') {
+  return el('span', { class:`li-ic ${tone}` }, svg(path));
+}
+
 export function svg(path, extra = '') {
   return el('span', { html:`<svg viewBox="0 0 24 24" ${extra}>${path}</svg>` }).firstChild;
 }
@@ -29,7 +34,22 @@ export const ICON = {
   play:  '<path d="M8 5l11 7-11 7z"/>',
   home:  '<path d="M4 11l8-7 8 7v9H4z"/>',
   plus:  '<path d="M12 5v14M5 12h14"/>',
-  share: '<path d="M12 16V4M8 8l4-4 4 4M5 14v5h14v-5"/>',
+  share:  '<path d="M12 16V4M8 8l4-4 4 4M5 14v5h14v-5"/>',
+  link:    '<path d="M10 14a4 4 0 006 0l3-3a4 4 0 00-6-6l-1 1M14 10a4 4 0 00-6 0l-3 3a4 4 0 006 6l1-1"/>',
+  external:'<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/>',
+  download:'<path d="M12 3v13M7 12l5 5 5-5M4 20h16"/>',
+  key:     '<circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M15 12v2"/>',
+  exit:    '<path d="M14 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4M10 8l-4 4 4 4M6 12h9"/>',
+  code:    '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>',
+  rocket:  '<path d="M12 3c3.5 2 5.5 5.5 5.5 9L12 17l-5.5-5C6.5 8.5 8.5 5 12 3zM9 17l-2 4 4-2M15 17l2 4-4-2"/><circle cx="12" cy="10" r="1.6"/>',
+  printer: '<path d="M7 9V3h10v6M7 19H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2M7 15h10v6H7z"/>',
+  pencil:  '<path d="M4 20h4L20 8a2.8 2.8 0 00-4-4L4 16v4z"/>',
+  play:    '<path d="M8 5l11 7-11 7z"/>',
+  grid:    '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+  image:   '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M4 17l5-5 4 4 2-2 5 5"/>',
+  sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+  doc:     '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5M9 13h6M9 17h4"/>',
+  search:  '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
 };
 
 /* ------------------------------------------------------------- feedback */

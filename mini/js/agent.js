@@ -132,6 +132,32 @@ function systemPrompt(role, chat) {
   return parts.join('\n\n');
 }
 
+/**
+ * What to show while a tool is running.
+ *
+ * The tools report what they did once they are done; this is the line that
+ * stands there in the meantime, naming the actual file, lesson or chapter
+ * rather than a generic "working…".
+ */
+function startLabel(name, a = {}) {
+  switch (name) {
+    case 'write_file':     return `Writing ${a.path || 'a file'}`;
+    case 'edit_file':      return `Editing ${a.path || 'a file'}`;
+    case 'delete_file':    return `Deleting ${a.path || 'a file'}`;
+    case 'read_file':      return a.path ? `Reading ${a.path}` : 'Listing the files';
+    case 'run_check':      return 'Running the app and watching for errors';
+    case 'screenshot':     return 'Taking a screenshot';
+    case 'publish_app':    return `Saving ${a.name || 'the app'}`;
+    case 'course_outline': return 'Planning the syllabus';
+    case 'write_lesson':   return `Writing the lesson “${a.id || ''}”`;
+    case 'book_outline':   return 'Planning the chapters';
+    case 'write_chapter':  return `Writing the chapter “${a.id || ''}”`;
+    case 'set_cover':      return 'Drawing the cover';
+    case 'read_source':    return `Reading the document, part ${a.part || 1}`;
+    default:               return name.replace(/_/g, ' ');
+  }
+}
+
 /** Persisted history -> request messages. Images ride along only on user turns. */
 function history(chat, limit) {
   const msgs = chat.messages.filter(m => m.role === 'user' || (m.role === 'assistant' && m.content));
@@ -193,15 +219,28 @@ export class Agent {
       scratch.push({ role:'assistant', content: text || null, tool_calls: calls });
 
       const images = [];
-      for (const c of calls) {
+      for (const [ci, c] of calls.entries()) {
+        // Keyed by position as well as id: some providers reuse a call id
+        // across steps, and two lessons must not collapse into one row.
+        const stepKey = `${step}:${ci}:${c.id || ''}`;
         let args = {};
         try { args = JSON.parse(c.function.arguments || '{}'); }
         catch { scratch.push({ role:'tool', tool_call_id:c.id,
           content:'ERROR: arguments were not valid JSON. Send them again.' }); continue; }
 
+        // One row per tool call, updated in place: it appears the moment the
+        // call starts, says what is being touched, and settles when it lands.
+        this.onStep?.({ id:stepKey, kind:c.function.name, running:true,
+                        label: startLabel(c.function.name, args) });
+        const scoped = { ...this, onStep: st => this.onStep?.({ id:stepKey, ...st }) };
+
         let out;
-        try { out = await runTool(c.function.name, args, this); }
-        catch (e) { out = { text:`ERROR: ${e.message}` }; }
+        try { out = await runTool(c.function.name, args, scoped); }
+        catch (e) {
+          out = { text:`ERROR: ${e.message}` };
+          this.onStep?.({ id:stepKey, kind:c.function.name, ok:false,
+                          label:`${startLabel(c.function.name, args)} — failed` });
+        }
 
         scratch.push({ role:'tool', tool_call_id:c.id, content: out.text });
         if (out.image) images.push(out.image);

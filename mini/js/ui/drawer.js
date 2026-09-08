@@ -2,7 +2,7 @@
 
 import { state, save, deleteChat, newChat, getRole } from '../store.js';
 import { t } from '../i18n.js';
-import { $, el, openSheet, closeSheet, confirmSheet as ask, svg, ICON, field } from './dom.js';
+import { $, el, openSheet, closeSheet, confirmSheet as ask, svg, ICON, field, iconTile } from './dom.js';
 import { session } from '../auth.js';
 
 const DAY = 864e5;
@@ -63,13 +63,13 @@ function chatMenu(chat) {
   openSheet(() => [
     el('h3', { text: chat.title || t('newChat') }),
     el('button', { class:'list-item', onClick:() => renameSheet(chat) },
-      el('span', { class:'em', text:'✏️' }), el('span', { class:'txt' }, el('b', { text:t('rename') }))),
+      iconTile(ICON.pencil), el('span', { class:'txt' }, el('b', { text:t('rename') }))),
     el('button', { class:'list-item', onClick:async () => {
       closeSheet();
       if (await ask({ title:t('confirmDelete'), text:chat.title, ok:t('delete') })) {
         deleteChat(chat.id); renderDrawer(); window.__miniRender?.();
       }
-    }}, el('span', { class:'em', text:'🗑' }),
+    }}, iconTile(ICON.trash, 'danger'),
         el('span', { class:'txt' }, el('b', { text:t('delete'), style:{ color:'var(--danger)' } }))),
   ]);
 }

@@ -103,11 +103,15 @@ export async function listModels(settings) {
   const json = await res.json();
   const rows = json.data || json.models || [];
   return rows.map(m => ({
-    id: m.id || m.name,
+    // Gemini's OpenAI-compatible listing prefixes ids with "models/", which
+    // its own chat endpoint then rejects.
+    id: String(m.id || m.name || '').replace(/^models\//, ''),
     name: m.name || m.id,
     ctx: m.context_length || m.context_window || 0,
     vision: !!(m.architecture?.input_modalities?.includes('image')
-            || /vision|vl|gpt-4o|gemini|claude|llama-3\.2/i.test(m.id || '')),
+            || /vision|vl|gpt-4o|gemini|claude|llama-3\.2|pixtral|qwen.*vl/i.test(m.id || '')),
+    vendor: String(m.id || '').includes('/') ? String(m.id).split('/')[0]
+          : /^gemini/i.test(m.id || '') ? 'google' : 'model',
     priceIn:  Number(m.pricing?.prompt || 0) * 1e6,
     priceOut: Number(m.pricing?.completion || 0) * 1e6,
     free: /:free$/.test(m.id || '') || Number(m.pricing?.prompt || 0) === 0,

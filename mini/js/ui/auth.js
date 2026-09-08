@@ -2,7 +2,7 @@
 
 import { t } from '../i18n.js';
 import * as auth from '../auth.js';
-import { $, $$, el, toast, openSheet, closeSheet, confirmSheet, field } from './dom.js';
+import { $, $$, el, toast, openSheet, closeSheet, confirmSheet, field, iconTile, ICON } from './dom.js';
 
 let mode = 'login', onDone = null, busy = false;
 
@@ -93,7 +93,7 @@ export function openAccount(afterChange) {
     el('div', { class:'note', text:t('inactiveNote').replace('{n}', u.inactiveDays ?? 30) }),
 
     el('button', { class:'list-item', style:{ marginTop:'10px' }, onClick:() => openPassword() },
-      el('span', { class:'em', text:'🔑' }), el('span', { class:'txt' }, el('b', { text:t('changePassword') }))),
+      iconTile(ICON.key), el('span', { class:'txt' }, el('b', { text:t('changePassword') }))),
 
     el('button', { class:'list-item', onClick:async () => {
       closeSheet();
@@ -101,7 +101,7 @@ export function openAccount(afterChange) {
         auth.logout();
         location.reload();
       }
-    }}, el('span', { class:'em', text:'🚪' }), el('span', { class:'txt' }, el('b', { text:t('signOut') }))),
+    }}, iconTile(ICON.exit), el('span', { class:'txt' }, el('b', { text:t('signOut') }))),
 
     el('button', { class:'list-item', onClick:async () => {
       closeSheet();
@@ -110,7 +110,7 @@ export function openAccount(afterChange) {
         auth.wipeLocal();
         location.reload();
       }
-    }}, el('span', { class:'em', text:'🗑' }),
+    }}, iconTile(ICON.trash, 'danger'),
         el('span', { class:'txt' }, el('b', { text:t('deleteAccount'), style:{ color:'var(--danger)' } }))),
   ], { onClose: afterChange });
 }

@@ -10,6 +10,7 @@
 
 import { state, marketBase } from './store.js';
 import { stream } from './llm.js';
+import { runCheck, formatCheck } from './sandbox.js';
 import { authHeaders, session } from './auth.js';
 
 const CACHE_KEY = 'mini.market.cache';
@@ -61,6 +62,13 @@ REJECT if it is empty or a template ("hello world"), unfinished, broken, repetit
 
 Pick a category from the existing ones. If none fits, invent a short, general one (for example "Games", "Tools", "Health", "Learning", "Finance", "Reading").
 
+THE APP HAS ALREADY BEEN RUN. An automated report of that run is included below: JavaScript errors, controls that were clicked, layout problems. Judge whether it works from THAT report, not from reading the code.
+
+NEVER reject because:
+- the code you were given is cut off — long files are truncated on the way to you, and a cut end is not a syntax error;
+- the style is not to your taste, the code is minified, or you would have written it differently.
+Reject only for the reasons listed above, and let the automated report decide whether it runs.
+
 Reply with JSON and nothing else:
 {"ok":true|false,"score":1-5,"note":"one short reason","summary":"one sentence saying what it does","category":"slug-in-latin-letters","categoryName":"Display name","categoryIcon":"one emoji","tags":["2-4 tags"]}`;
 
@@ -69,11 +77,32 @@ Reply with JSON and nothing else:
  * @returns {{ok:boolean, score:number, note:string, summary:string,
  *            category:string, categoryName:string, categoryIcon:string, tags:string[]}}
  */
-export async function reviewApp(project, meta, categories = []) {
+export async function reviewApp(project, meta, categories = [], onProgress) {
   const s = state.settings;
-  const html = project.files['index.html'] || '';
-  const code = Object.entries(project.files)
-    .map(([k, v]) => `--- ${k}\n${v.slice(0, 6000)}`).join('\n\n').slice(0, 16000);
+  const files = Object.entries(project.files);
+  const bytes = files.reduce((n, [, v]) => n + v.length, 0);
+
+  // Run it first. A verdict about whether an app works should come from
+  // watching it work, not from reading a copy of its source that had to be
+  // cut short on the way — which is what used to make every review fail.
+  onProgress?.('running');
+  const check = await runCheck(project, { interact:true }).catch(e => ({ fatal:e.message }));
+  const report = formatCheck(check);
+
+  onProgress?.('reading');
+  let budget = 90_000;
+  const code = files.map(([k, v]) => {
+    const share = Math.max(2000, Math.floor(budget / files.length));
+    const body = v.length > share ? v.slice(0, share) + `\n… [${v.length - share} more characters of ${k} not shown]` : v;
+    budget -= body.length;
+    return `--- ${k} (${v.length} chars)\n${body}`;
+  }).join('\n\n');
+
+  const outline = project.course
+    ? `This is a COURSE: ${project.course.modules.reduce((n, m) => n + m.lessons.length, 0)} lessons.`
+    : project.book
+    ? `This is a BOOK: ${project.book.chapters.length} chapters.`
+    : '';
 
   const catList = categories.length
     ? categories.map(c => `${c.id} (${c.name})`).join(', ')
@@ -83,7 +112,8 @@ export async function reviewApp(project, meta, categories = []) {
     { role:'system', content: REVIEW_PROMPT },
     { role:'user', content:
       `Existing categories: ${catList}\n\nName: ${meta.name}\nIcon: ${meta.emoji}\n` +
-      `Size: ${Math.round(html.length / 1024)} KB\n\nCode:\n${code}` },
+      `Size: ${Math.round(bytes / 1024)} KB across ${files.length} files.\n${outline}\n\n` +
+      `AUTOMATED RUN REPORT\n${report}\n\nSOURCE (may be truncated — that is not a defect)\n${code}` },
   ];
 
   let out = '';

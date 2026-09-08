@@ -67,9 +67,14 @@ function bubbleFor(m) {
 }
 
 function stepsList(steps) {
-  return el('div', { class:'steps' }, ...steps.map(s =>
-    el('div', { class:`step ${s.running ? 'run' : s.ok === false ? 'err' : 'done'}` },
-      el('span', { class:'dot' }), el('b', { text:s.label }))));
+  return el('div', { class:'steps' }, ...steps.map(stepRow));
+}
+
+function stepRow(s) {
+  return el('div', { class:`step ${s.running ? 'run' : s.ok === false ? 'err' : 'done'}` },
+    el('span', { class:'dot' }),
+    el('b', { text:s.label }),
+    s.running ? el('span', { class:'shimmer' }) : null);
 }
 
 /** One card per chat: the thing being built, always reachable at the bottom. */
@@ -167,7 +172,7 @@ function renderSource() {
   if (!src) return;
   box.innerHTML = '';
   box.append(
-    el('span', { class:'em', text:'📄' }),
+    svg(ICON.doc),
     el('b', { text:src.title }),
     el('small', { text:`${Math.round(src.text.length / 1000)}k` }),
     el('button', { 'aria-label':'Remove', onClick:() => {
@@ -230,22 +235,29 @@ export async function send() {
   };
   const timer = setInterval(paint, 90);
 
+  const byId = new Map();
   const repaintSteps = () => {
     stepsBox.innerHTML = '';
-    for (const st of steps) stepsBox.append(
-      el('div', { class:`step ${st.running ? 'run' : st.ok === false ? 'err' : 'done'}` },
-        el('span', { class:'dot' }), el('b', { text:st.label })));
+    for (const st of steps) stepsBox.append(stepRow(st));
   };
 
   agent = new Agent({
     settings: s,
     onDelta(v) { raw += v; dirty = true; typing.hidden = true; scrollDown(); },
     onStep(st) {
-      if (st.replace) {
+      // A step with an id belongs to one tool call and is updated in place.
+      if (st.id != null && byId.has(st.id)) {
+        const i = byId.get(st.id);
+        steps[i] = { ...steps[i], ...st, running: st.running ?? false };
+      } else if (st.replace) {
         const i = steps.findIndex(x => x.kind === st.kind && x.running);
-        if (i >= 0) { steps[i] = { ...st, running:false }; repaintSteps(); scrollDown(); return; }
+        if (i >= 0) steps[i] = { ...st, running:false };
+        else steps.push(st);
+      } else {
+        if (st.id != null) byId.set(st.id, steps.length);
+        steps.push(st);
       }
-      steps.push(st); repaintSteps(); scrollDown();
+      repaintSteps(); scrollDown();
     },
     onArtifact() { touch(chat); },
     publish(meta) {

@@ -9,8 +9,9 @@ export const PALETTE = ['#E8171F','#0A0A0B','#F0A93B','#31C56B','#3B82F6','#8B5C
 export const EMOJIS = ('🧮 📝 ⏱ 📷 🎨 🎵 💪 💧 📚 🍳 💰 ✅ 🎯 🌤 🗓 🔦 🎲 🧠 🏃 🛒 ' +
   '📊 🔐 🌱 ⭐ 🔔 🧩 🚗 ✈️ 🐱 🍎 ☕ 🎮 📌 🔬 🧭 🪙 🕹 🎁 🩺 🧺').split(' ');
 
-/** Rounded-square PNG with a centred glyph. Returns a data URL. */
-export function iconDataUrl(emoji, color, size = 192) {
+/** Rounded-square PNG with a centred glyph, or the app's own picture. */
+export function iconDataUrl(emoji, color, size = 192, image = null) {
+  if (image) return image;
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d');
@@ -42,8 +43,8 @@ async function dataUrlToBlob(url) { return await (await fetch(url)).blob(); }
  */
 export async function applyAppIdentity(app) {
   const base = location.pathname.replace(/[^/]*$/, '');
-  const icon192 = iconDataUrl(app.emoji, app.color, 192);
-  const icon512 = iconDataUrl(app.emoji, app.color, 512);
+  const icon192 = iconDataUrl(app.emoji, app.color, 192, app.iconImage);
+  const icon512 = iconDataUrl(app.emoji, app.color, 512, app.iconImage);
 
   document.title = app.name;
   set('meta[name="apple-mobile-web-app-title"]', 'content', app.name);
@@ -59,6 +60,9 @@ export async function applyAppIdentity(app) {
     await cache.put(u192, new Response(await dataUrlToBlob(icon192), { headers:{ 'Content-Type':'image/png' } }));
     await cache.put(u512, new Response(await dataUrlToBlob(icon512), { headers:{ 'Content-Type':'image/png' } }));
     await cache.put(uman, new Response(JSON.stringify({
+      // A distinct id is what lets a browser hold several installed apps from
+      // one origin instead of treating each as a reinstall of the last.
+      id: `${base}?app=${app.id}`,
       name: app.name, short_name: app.name.slice(0, 12),
       start_url: `${base}?app=${app.id}`, scope: base,
       display: 'standalone', orientation: 'portrait',
