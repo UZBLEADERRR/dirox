@@ -13,6 +13,8 @@
 import { runCheck, formatCheck } from './sandbox.js';
 import { buildCourse, buildBook } from './templates.js';
 import { runWorkers, sourceSlice, LESSON_SYSTEM, CHAPTER_SYSTEM, BLOCKS } from './subagent.js';
+import { settingsFor } from './store.js';
+import { pushProject, hasGithub } from './github.js';
 import { t } from './i18n.js';
 
 /* ---------------------------------------------------------------- schemas */
@@ -52,6 +54,14 @@ const publishTool = {
            emoji:{ type:'string', description:'A single emoji' },
            color:{ type:'string', description:'#RRGGBB background' } },
   required:['name','emoji'] };
+
+const githubTool = {
+  name:'github_push',
+  description:'Push the whole project to the user\'s GitHub in one commit. Creates the repository if it does not exist.',
+  params:{ repo:{ type:'string', description:'Repository name, e.g. habit-tracker' },
+           message:{ type:'string', description:'Commit message' },
+           private:{ type:'boolean' } },
+  required:['repo'] };
 
 const sourceTool = {
   name:'read_source',
@@ -120,12 +130,14 @@ const spec = (t) => ({
 });
 
 /** Only the tools the current job needs — schemas are paid for on every step. */
-export function toolsFor(kind, { hasSource = false } = {}) {
+export function toolsFor(kind, { hasSource = false, github = false } = {}) {
   const base =
     kind === 'course' ? [...courseTools, readTool, ...checkTools, publishTool]
   : kind === 'book'   ? [...bookTools, readTool, checkTools[0], publishTool]
   :                     [...fileTools, readTool, ...checkTools, publishTool];
-  return [...(hasSource ? [sourceTool] : []), ...base].map(spec);
+  return [...(hasSource ? [sourceTool] : []),
+          ...base,
+          ...(github ? [githubTool] : [])].map(spec);
 }
 
 /* -------------------------------------------------------------- executing */
@@ -286,7 +298,8 @@ ${BLOCKS}${sourceSlice(p.source, i, all.length)}` };
       });
 
       const res = await runWorkers(jobs, {
-        settings: ctx.settings, signal: ctx.signal, workers: ctx.settings?.workers,
+        settings: settingsFor(ctx.settings?.writerModel), signal: ctx.signal,
+        workers: ctx.settings?.workers,
         onStep: ctx.onStep, onUsage: ctx.onUsage, system: LESSON_SYSTEM,
       });
 
@@ -371,7 +384,8 @@ ${BLOCKS}${sourceSlice(p.source, i, all.length)}` };
       });
 
       const res = await runWorkers(jobs, {
-        settings: ctx.settings, signal: ctx.signal, workers: ctx.settings?.workers,
+        settings: settingsFor(ctx.settings?.writerModel), signal: ctx.signal,
+        workers: ctx.settings?.workers,
         onStep: ctx.onStep, onUsage: ctx.onUsage, system: CHAPTER_SYSTEM,
       });
 
@@ -433,6 +447,24 @@ ${BLOCKS}${sourceSlice(p.source, i, all.length)}` };
       ctx.onStep?.({ kind:'shot', label:t('steps.shot'), ok:!!r.shot, replace:true });
       if (!r.shot) return { text:`Screenshot failed (${r.shotError || 'unsupported'}). Use run_check instead.` };
       return { text:'Screenshot:', image:r.shot };
+    }
+
+    case 'github_push': {
+      if (!hasGithub()) return { text:'ERROR: no GitHub token is set in Settings.' };
+      ctx.onStep?.({ kind:'github', running:true, label:`Pushing to GitHub: ${args.repo || ''}` });
+      try {
+        const r = await pushProject({
+          repo: args.repo, files: p.files,
+          message: args.message || 'Update from Mini',
+          private: !!args.private,
+        });
+        ctx.onStep?.({ kind:'github', ok:true,
+          label:`${r.created ? 'Created' : 'Pushed to'} ${r.owner}/${r.repo} · ${r.commit}` });
+        return { text:`OK ${r.url} (branch ${r.branch}, commit ${r.commit}). Tell the user the link.` };
+      } catch (e) {
+        ctx.onStep?.({ kind:'github', ok:false, label:`GitHub: ${e.message}` });
+        return { text:`ERROR: ${e.message}` };
+      }
     }
 
     case 'publish_app': {

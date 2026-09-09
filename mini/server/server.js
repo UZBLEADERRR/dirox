@@ -16,6 +16,8 @@
  *   PORT               listen port (8080)
  *   MINI_DATA          data directory (mini/data)
  *   MINI_ADMIN_TOKEN   enables /api/admin/* when set
+ *   MINI_ADMIN_USERS   comma-separated usernames who get the admin panel
+ *                      inside the app, without handling a token
  *   MINI_MODERATE      "1" holds submissions for admin approval
  *   MINI_MAX_PER_DAY   publishes per device per day (1)
  *   MINI_MAX_PER_IP    publishes per address per day (20) — carrier NAT backstop
@@ -43,6 +45,9 @@ const DATA = path.resolve(process.env.MINI_DATA || path.join(ROOT, 'data'));
 const APPS = path.join(DATA, 'apps');
 const PORT = Number(process.env.PORT || 8080);
 const ADMIN = process.env.MINI_ADMIN_TOKEN || '';
+const ADMIN_USERS = new Set((process.env.MINI_ADMIN_USERS || '')
+  .split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+const isAdminUser = u => !!u && ADMIN_USERS.has(u.username);
 const MODERATE = process.env.MINI_MODERATE === '1';
 const PER_DAY = Number(process.env.MINI_MAX_PER_DAY || 1);
 // Mobile carriers put whole cities behind one address, so the IP cap is only
@@ -301,7 +306,7 @@ async function authRoute(req, res, action) {
     const day = today();
     const aiUsed = user.aiDay === day ? (user.aiCount || 0) : 0;
     return json(res, 200, {
-      user: auth.publicUser(user),
+      user: { ...auth.publicUser(user), isAdmin: isAdminUser(user) },
       quota: { perDay: PER_DAY, used, left: Math.max(0, PER_DAY - used) },
       free: freePublic() && { ...freePublic(), used: aiUsed,
                               left: Math.max(0, (freePublic().perDay) - aiUsed) },
@@ -546,16 +551,40 @@ const sameToken = (a, b) => {
   return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y);
 };
 
+/**
+ * Two ways in: a named account, or the token.
+ *
+ * MINI_ADMIN_USERS is the everyday one — those people sign in normally and
+ * the panel appears. The token stays for curl and for getting in when no
+ * account exists yet.
+ */
 function admin(req, res, action, url) {
-  if (!ADMIN || !sameToken(req.headers['x-admin-token'], ADMIN))
-    return json(res, 403, { error: 'forbidden' }, CORS);
+  const byToken = ADMIN && sameToken(req.headers['x-admin-token'], ADMIN);
+  const byUser = isAdminUser(bearer(req));
+  if (!byToken && !byUser) return json(res, 403, { error: 'forbidden' }, CORS);
 
   if (action === 'pending')
     return json(res, 200, state.apps.filter(a => a.status !== 'live'), CORS);
   if (action === 'all')
     return json(res, 200, state.apps, CORS);
   if (action === 'users')
-    return json(res, 200, auth.users.map(u => auth.publicUser(u)), CORS);
+    return json(res, 200, auth.users.map(u => ({ ...auth.publicUser(u), isAdmin: isAdminUser(u) })), CORS);
+  if (action === 'stats') {
+    const live = state.apps.filter(a => a.status === 'live');
+    return json(res, 200, {
+      users: auth.users.length,
+      apps: live.length,
+      pending: state.apps.filter(a => a.status === 'pending').length,
+      installs: live.reduce((n, a) => n + (state.installs[a.id] || 0) + (a.installs || 0), 0),
+      categories: new Set(live.map(a => a.cat)).size,
+      moderate: MODERATE,
+      free: freePublic(),
+      uptime: Math.round(process.uptime()),
+    }, CORS);
+  }
+  if (action === 'apps')
+    return json(res, 200, state.apps.filter(a => a.status !== 'replaced')
+      .map(({ files, assets, ...row }) => row).slice(0, 300), CORS);
   if (action === 'sweep')
     return json(res, 200, { removed: auth.sweep() }, CORS);
   if (action === 'config') {

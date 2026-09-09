@@ -9,6 +9,7 @@
  */
 
 import { stream, LLMError } from './llm.js';
+import { settingsFor } from './store.js';
 import { toolsFor, runTool } from './tools.js';
 
 const BLOCKS = `INTERACTIVE MARKUP (the player styles and wires these — do not write CSS or JS):
@@ -157,6 +158,7 @@ function startLabel(name, a = {}) {
     case 'write_chapter':  return `Writing the chapter “${a.id || ''}”`;
     case 'set_cover':      return 'Drawing the cover';
     case 'read_source':    return `Reading the document, part ${a.part || 1}`;
+    case 'github_push':    return `Pushing to GitHub: ${a.repo || ''}`;
     default:               return name.replace(/_/g, ' ');
   }
 }
@@ -185,7 +187,8 @@ export class Agent {
    * again, until the model answers without asking for a tool.
    */
   async run(chat, role) {
-    const s = this.settings;
+    const s = settingsFor(role.model);      // a role may pin its own model
+    this.settings = s;
     this.project = chat.project;
     this.controller = new AbortController();
     const signal = this.controller.signal;
@@ -196,7 +199,8 @@ export class Agent {
     ];
     const scratch = [];                 // this turn's tool traffic; discarded after
     const tools = role.tools
-      ? toolsFor(role.kind || 'app', { hasSource: !!chat.project.source })
+      ? toolsFor(role.kind || 'app',
+                 { hasSource: !!chat.project.source, github: !!s.githubToken })
       : null;
     let finalText = '';
 

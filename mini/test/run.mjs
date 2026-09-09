@@ -510,6 +510,69 @@ group('Market: shared links and server validation');
   ok('an unreviewed app is refused', r3.status === 400 && /review/.test(r3.body.error), JSON.stringify(r3));
 }
 
+/* --------------------------------------------------- 9. handing over code */
+
+group('Export: a real zip anyone can open');
+{
+  const { page, ctx, errs } = await newPage(seed());
+  const b64 = await page.evaluate(async () => {
+    const { projectZip } = await import('./js/zip.js');
+    const app = { id:'demo', name:'Habit Tracker', emoji:'✅', color:'#31C56B',
+      files:{ 'index.html':'<!doctype html><html><body><h1>Habits</h1></body></html>',
+              'app.js':'console.log("hello");\n'.repeat(40) },
+      assets:[{ name:'logo.png', data:'data:image/png;base64,iVBORw0KGgo=' }] };
+    const blob = await projectZip(app, { url:'https://example.com/a/demo/' });
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (const x of buf) bin += String.fromCharCode(x);
+    return btoa(bin);
+  });
+
+  const zip = Buffer.from(b64, 'base64');
+  ok('it is a zip', zip.subarray(0, 4).toString('hex') === '504b0304', zip.subarray(0, 4).toString('hex'));
+
+  // Read it back the way any unzip tool would: central directory, then inflate.
+  const zlib = await import('node:zlib');
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  let eocd = -1;
+  for (let i = zip.length - 22; i >= 0; i--) if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  ok('the directory is where it should be', eocd > 0, String(eocd));
+
+  const count = view.getUint16(eocd + 10, true);
+  let cursor = view.getUint32(eocd + 16, true);
+  const entries = {}, sizes = {};
+  for (let k = 0; k < count; k++) {
+    const method = view.getUint16(cursor + 10, true);
+    const csize = view.getUint32(cursor + 20, true);
+    const nameLen = view.getUint16(cursor + 28, true);
+    const extraLen = view.getUint16(cursor + 30, true);
+    const commentLen = view.getUint16(cursor + 32, true);
+    const off = view.getUint32(cursor + 42, true);
+    const name = zip.subarray(cursor + 46, cursor + 46 + nameLen).toString();
+    const lv = new DataView(zip.buffer, zip.byteOffset + off, 30);
+    const start = off + 30 + lv.getUint16(26, true) + lv.getUint16(28, true);
+    const body = zip.subarray(start, start + csize);
+    entries[name] = method === 8 ? zlib.inflateRawSync(body) : body;
+    sizes[name] = { stored: csize, raw: view.getUint32(cursor + 24, true), method };
+    cursor += 46 + nameLen + extraLen + commentLen;
+  }
+
+  ok('every file is in there',
+     !!entries['index.html'] && !!entries['app.js'] && !!entries['README.md'] &&
+     !!entries['.github/workflows/android.yml'] && !!entries['assets/logo.png'],
+     Object.keys(entries).join(', '));
+  ok('the contents survive the round trip',
+     entries['index.html'].toString().includes('<h1>Habits</h1>'));
+  ok('repetitive files are actually compressed',
+     sizes['app.js'].method === 8 && sizes['app.js'].stored < sizes['app.js'].raw / 8,
+     `${sizes['app.js'].raw} bytes stored as ${sizes['app.js'].stored}`);
+  ok('the readme names the app', entries['README.md'].toString().includes('# Habit Tracker'));
+  ok('the workflow points at the hosted address',
+     entries['.github/workflows/android.yml'].toString().includes('https://example.com/a/demo/'));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 /* ------------------------------------------------ 9. parallel writers */
 
 group('Parallel writers: the pool itself');
@@ -563,7 +626,7 @@ group('Parallel writers: the pool itself');
   await ctx.close();
 }
 
-/* ------------------------------------------------ 10. the free model */
+/* ------------------------------------------------ 11. the free model */
 
 group('Free model: the operator pays, the server holds the key');
 {
@@ -628,7 +691,64 @@ group('Free model: the operator pays, the server holds the key');
   ok('the operator can turn it off again', after.free === null, JSON.stringify(after));
 }
 
-/* --------------------------------------------- 11. the inactivity rule */
+group('Admin panel: the screen, not the cheat sheet');
+{
+  const acct = await makeAccount('Owner', 'owner');
+  const { page, ctx, errs } = await newPage(seed(), acct);
+
+  // No admin rights yet: the settings sheet must not offer the panel.
+  await page.click('#btn-menu'); await page.waitForTimeout(250);
+  await page.click('#btn-settings'); await page.waitForTimeout(400);
+  ok('an ordinary account sees no panel',
+     !(await page.textContent('#sheet-body')).includes('Admin panel'));
+  await page.click('#sheet-scrim', { position:{ x:195, y:10 } });
+  await page.waitForTimeout(300);
+
+  // The token is the way in before MINI_ADMIN_USERS is set.
+  await page.goto(`${ORIGIN}/?admin=1`, { waitUntil:'networkidle' });
+  await page.waitForTimeout(1000);
+  ok('?admin=1 asks for the token',
+     (await page.textContent('#sheet-body')).includes('Admin token'));
+  await page.fill('#sheet-body input[type=password]', 'test-admin');
+  await page.click('#sheet-body .btn.primary');
+  await page.waitForTimeout(900);
+
+  const panel = await page.textContent('#sheet-body');
+  ok('the panel opens', panel.includes('accounts') && panel.includes('installs'), panel.slice(0, 90));
+  ok('it reports the market', panel.includes('All apps'));
+  ok('and offers the free model', panel.includes('Set one up') || panel.includes('Change it'));
+
+  await page.locator('#sheet-body .list-item', { hasText:'Set one up' }).click();
+  await page.waitForTimeout(400);
+  const inputs = page.locator('#sheet-body input');
+  await inputs.nth(0).fill(API);
+  await inputs.nth(1).fill('secret-from-the-panel');
+  await inputs.nth(2).fill('mock/fast');
+  await inputs.nth(3).fill('House model');
+  await inputs.nth(4).fill('7');
+  await page.click('#sheet-body .btn.primary');
+  await page.waitForTimeout(700);
+
+  const cfg = await fetch(ORIGIN + '/api/config').then(r => r.json());
+  ok('the free model was set from the panel',
+     cfg.free?.model === 'mock/fast' && cfg.free.perDay === 7, JSON.stringify(cfg));
+  ok('the key stays on the server', !JSON.stringify(cfg).includes('secret-from-the-panel'));
+
+  // The token is remembered, so the panel is one tap away next time.
+  await page.goto(`${ORIGIN}/`, { waitUntil:'networkidle' });
+  await page.waitForTimeout(900);
+  await page.click('#btn-menu'); await page.waitForTimeout(250);
+  await page.click('#btn-settings'); await page.waitForTimeout(500);
+  ok('and it is remembered', (await page.textContent('#sheet-body')).includes('Admin panel'));
+
+  await fetch(ORIGIN + '/api/admin/config', { method:'POST',
+    headers:{ 'Content-Type':'application/json', 'X-Admin-Token':'test-admin' },
+    body: JSON.stringify({ clear:true }) });
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+/* --------------------------------------------- 12. the inactivity rule */
 
 group('The inactivity rule');
 {

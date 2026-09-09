@@ -47,6 +47,9 @@ const DEFAULTS = {
     historyLimit: 24,         // messages kept in the request window
     maxSteps: 26,             // agent tool-loop budget
     workers: 4,               // lessons or chapters written in parallel
+    writerModel: '',          // model the parallel writers use ('' = the main one)
+    reviewModel: '',          // model that judges a market submission
+    githubToken: '',          // lets the agent push a project to GitHub
     installDismissed: false,
     marketUrl: '',            // '' = same origin as this page
     useFree: false,           // use the model the server pays for
@@ -168,6 +171,18 @@ export function appData(appId) {
 }
 export function setAppData(appId, data) {
   try { localStorage.setItem(APPDATA + appId, JSON.stringify(data)); } catch {}
+}
+
+/**
+ * The settings a particular job should run with.
+ *
+ * A role can pin its own model — a careful one for the architecture, a fast
+ * one for churning out lesson bodies — and everything else stays shared.
+ * On the free relay the server picks the model, so an override is ignored.
+ */
+export function settingsFor(model) {
+  const s = state.settings;
+  return model && !s.useFree ? { ...s, model, modelName: model } : s;
 }
 
 /** Where the market lives. Empty setting = the site this page came from. */

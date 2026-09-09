@@ -8,7 +8,7 @@
  * publishing, not the person hosting.
  */
 
-import { state, marketBase, publishApp } from './store.js';
+import { state, marketBase, publishApp, settingsFor } from './store.js';
 import { stream } from './llm.js';
 import { runCheck, formatCheck } from './sandbox.js';
 import { authHeaders, session } from './auth.js';
@@ -90,7 +90,7 @@ Reply with JSON and nothing else:
  *            category:string, categoryName:string, categoryIcon:string, tags:string[]}}
  */
 export async function reviewApp(project, meta, categories = [], onProgress) {
-  const s = state.settings;
+  const s = settingsFor(state.settings.reviewModel);
   const files = Object.entries(project.files);
   const bytes = files.reduce((n, [, v]) => n + v.length, 0);
 

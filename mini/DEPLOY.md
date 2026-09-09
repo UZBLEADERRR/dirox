@@ -47,6 +47,7 @@ Servis → **Variables**:
 | --- | --- | --- |
 | `MINI_DATA` | `/data` | **majburiy** — volume mount path bilan bir xil |
 | `MINI_ADMIN_TOKEN` | uzun tasodifiy satr | `/api/admin/*` ni yoqadi |
+| `MINI_ADMIN_USERS` | `sizning_username` | shu akkauntlarga ilova ichidagi admin panel ochiladi |
 | `MINI_MODERATE` | `1` | ilovalar sizning tasdig'ingizni kutadi |
 | `MINI_MAX_PER_DAY` | `1` | bir qurilmadan kuniga nechta ilova |
 | `MINI_MAX_PER_IP` | `20` | bir IP dan kuniga nechta (operator NAT uchun) |
@@ -139,6 +140,20 @@ user chegarasiz ishlaydi.
 **Xarajatni nazorat qilish:** `perDay` (kuniga xabar) × faol userlar soni.
 Arzon modelni tanlang — `perDay: 20` va gemini-flash bilan bir user kuniga
 bir tiyinlik chiqadi. `/api/config` kalitni hech qachon qaytarmaydi.
+
+---
+
+## Admin panelga kirish
+
+Eng qulayi: `MINI_ADMIN_USERS` ga o'z username'ingizni qo'ying (vergul bilan
+bir nechta ham bo'ladi). Shundan keyin o'sha akkaunt bilan kirsangiz,
+**Sozlamalar → Admin panel** paydo bo'ladi va token kerak emas.
+
+Token bilan: `https://SIZNING-DOMEN/?admin=1` → `MINI_ADMIN_TOKEN` ni
+kiriting. Qurilmada saqlanadi, keyingi safar to'g'ridan-to'g'ri ochiladi.
+
+Panelda hammasi bor: statistika, bepul modelni sozlash, market navbati,
+ilovalarni o'chirish, akkauntlar.
 
 ---
 

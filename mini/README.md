@@ -125,6 +125,24 @@ allaqachon o'rnatilgan va butunlay telefonda ishlaydi.
 
 ---
 
+## Admin panel
+
+Serveringizni boshqarish uchun curl shart emas — panel ilovaning ichida.
+
+**Kirish:** Railway'da `MINI_ADMIN_USERS=sizning_username` qo'ying. Shundan
+so'ng o'sha akkaunt bilan kirsangiz, **Sozlamalar → Admin panel** paydo
+bo'ladi. Token bilan ovora bo'lmaysiz.
+
+Hali qo'ymagan bo'lsangiz: `https://SIZNING-DOMEN/?admin=1` ni oching va
+`MINI_ADMIN_TOKEN` ni bir marta kiriting — u shu qurilmada saqlanadi.
+
+Panelda: akkauntlar/ilovalar/o'rnatishlar soni, **bepul modelni sozlash**
+(provayder, kalit, model, kunlik chegara), **market navbati** (moderatsiya
+yoqilgan bo'lsa tasdiqlash), **hamma ilovalar** (o'chirish), **akkauntlar**
+ro'yxati va faolsizlarni darrov tozalash.
+
+---
+
 ## Bepul model
 
 Kaliti yo'q odam ilovani sinab ko'ra olmaydi — shuning uchun server egasi
@@ -205,6 +223,18 @@ yarim ishlaydigan tugma yo'q, holat `localStorage`da saqlanadi, bo'sh va xato
 holatlari o'ylangan, dizayn mobil uchun (44px tugmalar, safe-area, tungi va
 kunduzgi rejim).
 
+### Har bir ish uchun alohida model
+
+Bitta model hamma ishga to'g'ri kelmaydi. Shuning uchun:
+
+- **Har bir rol o'z modelini** oladi — Dizaynerga kuchlisi, Dasturchiga
+  boshqasi, backend uchun uchinchisi. Rol tahririda tanlanadi.
+- **Parallel yozuvchilar** uchun alohida model (odatda arzonroq va tezrog'i).
+- **Market tekshiruvi** uchun alohida model.
+
+Tanlanmagan joyda asosiy model ishlatiladi. Bepul model rejimida modelni
+server tanlaydi, shuning uchun bu tanlovlar o'shanda e'tiborga olinmaydi.
+
 ### Parallel yozuvchilar (sub-agentlar)
 
 Yigirma darslik kursni bitta agent ketma-ket yozsa, yigirma marta borib
@@ -239,6 +269,28 @@ arxitekturada:
 - **Sub-agent konteksti kichik** — har biri faqat o'z darsini ko'radi, butun
   suhbatni emas.
 - Kod chatga nusxalanmaydi — artifact kartasida turadi.
+
+---
+
+## Kodni olib chiqish: ZIP, GitHub, APK
+
+**ZIP.** Har qanday ilovaning menyusida «Download the code» bor. Ichida:
+loyiha fayllari, rasmlar, `README.md` va `.github/workflows/android.yml`.
+Arxiv brauzerning o'zida yig'iladi (`CompressionStream`) — hech qanday
+kutubxonasiz.
+
+**GitHub.** Sozlamalarga GitHub tokeningizni qo'ysangiz, agentda
+`github_push` vositasi paydo bo'ladi: «buni github'ga qo'y» desangiz,
+repozitoriyni yaratadi va butun loyihani **bitta commit** bilan yuboradi
+(blob → tree → commit → ref). Token qurilmadan chiqmaydi; so'rovlar
+to'g'ridan-to'g'ri `api.github.com` ga ketadi.
+
+**APK.** Brauzerda APK kompilyatsiya qilib bo'lmaydi — buni ochiq aytamiz.
+Shuning uchun ZIP ichidagi GitHub Actions ish oqimi buni **GitHub'da**
+bajaradi: repozitoriyni push qilasiz, **Actions → Build APK** ni bosasiz,
+tugagach artefaktdan APK ni yuklab olasiz. U hosted manzilni Trusted Web
+Activity ichiga o'raydi — APK kichik bo'ladi va saytni yangilaganingizda
+ilova ham yangilanadi.
 
 ---
 

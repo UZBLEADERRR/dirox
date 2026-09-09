@@ -3,10 +3,13 @@
 import { state, save, allRoles, uid, storageBytes, deleteApp, publishApp } from '../store.js';
 import { t } from '../i18n.js';
 import { listModels } from '../llm.js';
+import { whoami } from '../github.js';
+import { projectZip, download } from '../zip.js';
 import { PALETTE, EMOJIS, iconDataUrl, applyAppIdentity, appUrl } from '../icons.js';
 import { $, el, openSheet, closeSheet, confirmSheet, switchRow, field, toast, fmtBytes,
          ICON, svg, iconTile, appIcon, readImage } from './dom.js';
 import { session } from '../auth.js';
+import { openAdmin, canAdmin } from './admin.js';
 
 const PROVIDERS = [
   ['OpenRouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/keys'],
@@ -67,6 +70,31 @@ export function openSettings(afterChange) {
           el('small', { text:s.modelName || s.model || t('chooseModel') })),
         svg('<path d="M9 6l6 6-6 6"/>', 'class="tick"')),
 
+      el('h4', { text:'GitHub' }),
+      (() => {
+        const tok = el('input', { type:'password', value:s.githubToken || '',
+          placeholder:'ghp_… (repo scope)', autocapitalize:'off', spellcheck:'false' });
+        const who = el('div', { class:'hint' });
+        tok.addEventListener('change', async () => {
+          s.githubToken = tok.value.trim(); save();
+          who.textContent = '';
+          if (!s.githubToken) return;
+          try {
+            const me = await whoami();
+            who.textContent = `Connected as @${me.login}`;
+          } catch (e) { who.textContent = e.message; }
+        });
+        if (s.githubToken) whoami().then(m => { who.textContent = `Connected as @${m.login}`; })
+                                   .catch(e => { who.textContent = e.message; });
+        return el('div', { class:'field' },
+          el('label', { text:'Personal access token' }), tok,
+          el('div', { class:'hint',
+            html:'With a token the agent can push a finished project straight to your GitHub. ' +
+                 'Create one at <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a> ' +
+                 'with read and write access to repositories. It stays on this phone.' }),
+          who);
+      })(),
+
       el('h4', { text:t('market') }),
       (() => {
         const mk = el('input', { type:'url', value:s.marketUrl || '', placeholder:location.origin,
@@ -96,6 +124,18 @@ export function openSettings(afterChange) {
       sliderRow('Messages remembered', s.historyLimit, 6, 60, 2, v => { s.historyLimit = v; save(); }),
       sliderRow('Agent step limit', s.maxSteps, 4, 60, 1, v => { s.maxSteps = v; save(); }),
       sliderRow('Parallel writers', s.workers ?? 4, 1, 8, 1, v => { s.workers = v; save(); }),
+      el('button', { class:'list-item', onClick:() => openModels(rerender, {
+        title:'Model for the parallel writers', current: s.writerModel || '',
+        onPick: id => { s.writerModel = id; save(true); } })},
+        iconTile(ICON.sparkle),
+        el('span', { class:'txt' }, el('b', { text:'Writers' }),
+          el('small', { text: s.writerModel || 'Same as the default' }))),
+      el('button', { class:'list-item', onClick:() => openModels(rerender, {
+        title:'Model that reviews market submissions', current: s.reviewModel || '',
+        onPick: id => { s.reviewModel = id; save(true); } })},
+        iconTile(ICON.check),
+        el('span', { class:'txt' }, el('b', { text:'Market review' }),
+          el('small', { text: s.reviewModel || 'Same as the default' }))),
 
       el('h4', { text:t('storage') }),
       el('div', { class:'note', text:`${fmtBytes(storageBytes())} · ${state.chats.length} chats · ${state.apps.length} apps` }),
@@ -106,6 +146,13 @@ export function openSettings(afterChange) {
             location.reload();
           }
         }})),
+
+      canAdmin() ? el('div', {},
+        el('h4', { text:'Server' }),
+        el('button', { class:'list-item', onClick:() => openAdmin() },
+          iconTile(ICON.key, 'red'),
+          el('span', { class:'txt' }, el('b', { text:'Admin panel' }),
+            el('small', { text:'Free model, market queue, accounts' })))) : null,
 
       el('div', { class:'note', style:{ marginTop:'18px' },
         html:'<b>Mini</b> is open source. Your chats and apps never leave this device; requests go straight to the API you chose.' }),
@@ -135,8 +182,9 @@ let modelCache = null;
  * choose on (free, cheap, can see pictures), and rows grouped by vendor so a
  * familiar name is findable without knowing its exact id.
  */
-export function openModels(afterChange) {
+export function openModels(afterChange, pick = null) {
   const s = state.settings;
+  const current = pick ? pick.current : s.model;
   let filter = 'all';
 
   openSheet(() => {
@@ -184,15 +232,17 @@ export function openModels(afterChange) {
         const price = m.free ? 'free'
           : m.priceIn ? `$${m.priceIn < 1 ? m.priceIn.toFixed(2) : m.priceIn.toFixed(1)} in · $${m.priceOut.toFixed(m.priceOut < 1 ? 2 : 1)} out per 1M`
           : '';
-        list.append(el('button', { class:`list-item ${m.id === s.model ? 'sel' : ''}`, onClick:() => {
-          s.model = m.id; s.modelName = m.name; save(true); afterChange?.(); closeSheet(); toast(m.name);
+        list.append(el('button', { class:`list-item ${m.id === current ? 'sel' : ''}`, onClick:() => {
+          if (pick) pick.onPick(m.id, m.name);
+          else { s.model = m.id; s.modelName = m.name; save(true); }
+          afterChange?.(); closeSheet(); toast(m.name);
         }},
           iconTile(m.vision ? ICON.image : ICON.sparkle, m.free ? 'red' : ''),
           el('span', { class:'txt' },
             el('b', { text:m.name.replace(/^[^:]+:\s*/, '') }),
             el('small', { text:[price, m.ctx ? `${Math.round(m.ctx / 1000)}k context` : '']
               .filter(Boolean).join(' · ') })),
-          m.id === s.model ? svg(ICON.check, 'class="tick"') : null));
+          m.id === current ? svg(ICON.check, 'class="tick"') : null));
       }
     };
 
@@ -210,7 +260,15 @@ export function openModels(afterChange) {
       }
     })();
 
-    return [el('h3', { text:t('chooseModel') }), head, list];
+    return [
+      el('h3', { text: pick?.title || t('chooseModel') }),
+      pick ? el('button', { class:`list-item ${current ? '' : 'sel'}`, onClick:() => {
+        pick.onPick('', ''); closeSheet(); afterChange?.();
+      }}, iconTile(ICON.check), el('span', { class:'txt' },
+        el('b', { text:'Same as the default' }),
+        el('small', { text: s.modelName || s.model || '—' }))) : null,
+      head, list,
+    ].filter(Boolean);
   });
 }
 
@@ -234,6 +292,7 @@ export function openRolePicker(chat, onPick) {
 }
 
 export function openRoleEditor(role, after) {
+  const rerenderRole = () => { closeSheet(); openRoleEditor(role, after); };
   const isNew = !role;
   const draft = isNew
     ? { id:uid(), emoji:'✨', name:'', prompt:'', tools:false }
@@ -261,6 +320,14 @@ export function openRoleEditor(role, after) {
       field(t('roleName'), name),
       field(t('icon'), emojiPick),
       field(t('rolePrompt'), prompt),
+      el('button', { class:'list-item', onClick:() => openModels(rerenderRole, {
+        title: `Model for ${draft.name || 'this role'}`,
+        current: draft.model || '',
+        onPick: (id) => { draft.model = id; },
+      })},
+        iconTile(ICON.sparkle),
+        el('span', { class:'txt' }, el('b', { text:'Model for this role' }),
+          el('small', { text: draft.model || 'Same as the default' }))),
       switchRow(t('roleTools'), t('roleToolsSub'), !!draft.tools, v => { draft.tools = v; }),
       el('div', { class:'btn-row' },
         !isNew && !role.builtin
@@ -386,6 +453,8 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint,
       iconTile(ICON.printer), el('span', { class:'txt' }, el('b', { text:t('print') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
       iconTile(ICON.code), el('span', { class:'txt' }, el('b', { text:t('code') }))),
+    el('button', { class:'list-item', onClick:() => { closeSheet(); downloadProject(app); } },
+      iconTile(ICON.download), el('span', { class:'txt' }, el('b', { text:'Download the code' }))),
     el('div', { class:'note', style:{ marginTop:'10px' },
       text:'Not saved yet. Use “Save as app” on the card in the chat.' }),
   ]);
@@ -408,6 +477,10 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint,
       iconTile(ICON.printer), el('span', { class:'txt' }, el('b', { text:t('print') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); openCode(app.files); } },
       iconTile(ICON.code), el('span', { class:'txt' }, el('b', { text:t('code') }))),
+    el('button', { class:'list-item', onClick:() => { closeSheet(); downloadProject(app); } },
+      iconTile(ICON.download), el('span', { class:'txt' },
+        el('b', { text:'Download the code' }),
+        el('small', { text:'A .zip with a README and an APK workflow' }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onMarket?.(app); } },
       iconTile(ICON.rocket, 'red'), el('span', { class:'txt' },
         el('b', { text:t('marketPublish') }), el('small', { text:'Let others install it' }))),
@@ -511,6 +584,16 @@ export function openAddToHome(app) {
         text:'Once added it opens full screen, with its own icon, and works offline.' }),
     ];
   });
+}
+
+/** Hands over the whole project as a zip, ready to open or to push. */
+export async function downloadProject(app) {
+  toast('Packing…');
+  try {
+    const url = app.id && app.id !== 'draft' ? location.origin + appUrl(app.id) : '';
+    const blob = await projectZip(app, { url });
+    download(blob, (app.name || 'app').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase() + '.zip');
+  } catch (e) { toast(`${t('error')}: ${e.message}`); }
 }
 
 /* ---------------------------------------------------------------- theme */

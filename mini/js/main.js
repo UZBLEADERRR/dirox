@@ -4,6 +4,7 @@ import { state, save, activeChat, newChat, setQuotaHandler, getApp } from './sto
 import { t } from './i18n.js';
 import { applyTheme, openSettings, openRolePicker, openAddToHome } from './ui/sheets.js';
 import { appRoot } from './icons.js';
+import { openAdmin } from './ui/admin.js';
 import { initChat, renderChat, send, stop, attachFiles, addPending } from './ui/chat.js';
 import { initApps, renderApps, openApp, closeApp, checkUpdates } from './ui/apps.js';
 import { initMarket, renderMarket, bindMarketControls, openSharedApp, openPublishToMarket } from './ui/market.js';
@@ -82,6 +83,7 @@ const pathApp = location.pathname.match(/\/a\/([A-Za-z0-9_-]{2,64})\/?$/)?.[1] |
 const deepAppId = pathApp || params.get('app');
 const deepMarket = params.get('m');       // a shared market link
 const wantsInstall = params.has('install');
+const wantsAdmin = params.has('admin');
 
 function showShell(tab = state.tab || 'chat') {
   $('#boot').hidden = true;
@@ -131,6 +133,8 @@ if (signedIn() || deepAppId) {
  */
 function afterRefresh(user) {
   if (!user && !deepAppId) { hideAuth(); return showAuth(() => location.reload()); }
+  // ?admin=1 is the way in before MINI_ADMIN_USERS is set: it asks for the token.
+  if (wantsAdmin) { history.replaceState(null, '', location.pathname); setTimeout(openAdmin, 300); }
   if (session.free && !state.settings.apiKey && !state.settings.useFree) {
     state.settings.useFree = true;
     save();
