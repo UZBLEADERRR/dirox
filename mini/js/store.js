@@ -132,7 +132,8 @@ export function touch(chat) { chat.updatedAt = Date.now(); save(); }
 
 /* ---------------- apps ---------------- */
 
-export function publishApp({ id, name, emoji, color, iconImage, files, assets, deviceAccess, marketId }) {
+export function publishApp({ id, name, emoji, color, iconImage, files, assets, deviceAccess,
+                             marketId, marketLine, marketVersion }) {
   let app = id ? state.apps.find(a => a.id === id) : null;
   if (!app) {
     app = { id: id || uid(), createdAt: Date.now() };
@@ -144,7 +145,7 @@ export function publishApp({ id, name, emoji, color, iconImage, files, assets, d
     assets: structuredClone(assets || []),
     deviceAccess: !!deviceAccess,
     updatedAt: Date.now(),
-    ...(marketId ? { marketId } : {}),
+    ...(marketId ? { marketId, marketLine, marketVersion } : {}),
   });
   save(true);
   return app;

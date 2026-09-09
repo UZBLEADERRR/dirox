@@ -1,6 +1,7 @@
 /** The home screen of mini-apps, and the player that runs one. */
 
 import { state, getApp, appData } from '../store.js';
+import { loadCatalogue, pendingUpdates, updateInstalled } from '../market.js';
 import { t } from '../i18n.js';
 import { mount, printableHtml } from '../sandbox.js';
 import { restoreIdentity, applyAppIdentity } from '../icons.js';
@@ -14,6 +15,18 @@ export function initApps(h) { hooks = h; }
 
 /* ----------------------------------------------------------------- grid */
 
+let updates = new Map();          // app id -> the newer row in the market
+
+/** Asks the market whether anything installed here has moved on. */
+export async function checkUpdates() {
+  if (!state.apps.some(a => a.marketLine)) return;
+  try {
+    const cat = await loadCatalogue({ fresh:true });
+    updates = new Map(pendingUpdates(cat).map(u => [u.app.id, u.latest]));
+    if (updates.size && !$('#apps-screen').hidden) renderApps();
+  } catch { /* offline; try again next time */ }
+}
+
 export function renderApps() {
   const grid = $('#apps-grid');
   grid.innerHTML = '';
@@ -26,7 +39,7 @@ export function renderApps() {
 
   for (const app of state.apps) {
     let held = false, timer = null;
-    const tile = el('button', { class:'app-tile' },
+    const tile = el('button', { class:`app-tile ${updates.has(app.id) ? 'has-update' : ''}` },
       appIcon(app),
       el('span', { text:app.name }));
 
@@ -35,6 +48,7 @@ export function renderApps() {
       onEdit: () => hooks.editApp?.(app),
       onMarket: () => hooks.onMarket?.(app),
       onPrint: () => printApp(app),
+      onUpdate: updates.has(app.id) ? () => applyUpdate(app) : null,
       onChanged: renderApps,
     });
 
@@ -116,6 +130,18 @@ export function closeApp() {
   player.querySelector('.fab-home')?.remove();
   $('#player-stage').innerHTML = '';
   restoreIdentity();
+}
+
+async function applyUpdate(app) {
+  const latest = updates.get(app.id);
+  if (!latest) return;
+  toast('Updating ' + app.name + '…');
+  try {
+    await updateInstalled(app, latest);
+    updates.delete(app.id);
+    renderApps();
+    toast(app.name + ' updated to v' + latest.version);
+  } catch (e) { toast(`${t('error')}: ${e.message}`); }
 }
 
 export const playerOpen = () => !$('#player').hidden;

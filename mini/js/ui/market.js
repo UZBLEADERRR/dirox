@@ -186,7 +186,7 @@ async function install(a, button) {
     const app = publishApp({
       name: full.name, emoji: full.emoji, color: full.color, iconImage: full.iconImage,
       files: full.files, assets: full.assets, deviceAccess: false,
-      marketId: a.id,
+      marketId: a.id, marketLine: a.line, marketVersion: a.version,
     });
     api.countInstall(a.id);
     a.installs = (a.installs || 0) + 1;

@@ -223,7 +223,9 @@ group('Home screen: a manifest per app');
   });
 
   ok('served by the service worker', r.ok && /manifest/.test(r.type), r.type);
-  ok('start_url points at the app', r.body.start_url.includes('?app=demo'), r.body.start_url);
+  ok('start_url is the app\'s own address', r.body.start_url.endsWith('/a/demo/'), r.body.start_url);
+  ok('so is its scope and id', r.body.scope === r.body.start_url && r.body.id === r.body.start_url,
+     `${r.body.scope} / ${r.body.id}`);
   ok('standalone display', r.body.display === 'standalone');
   ok('a real PNG icon', r.iconOk && r.iconBytes > 500, String(r.iconBytes));
   ok('iOS title and icon swapped in',
@@ -407,6 +409,68 @@ group('Market: the detail sheet runs the app before you take it');
   await page.waitForTimeout(250);
   ok('you can try it before installing', (await pv.locator('#out').textContent()) === '7');
   ok('the author is shown', (await page.textContent('#sheet-body')).includes('Tester'));
+  ok('no console errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+group('Market: an author ships a fix, installed copies catch up');
+{
+  const author = await makeAccount('Updater', 'updater');
+  const publish = (body) => fetch(ORIGIN + '/api/market/submit', {
+    method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + author.token },
+    body: JSON.stringify(body) }).then(async r => ({ status:r.status, body: await r.json() }));
+
+  const make = (n) => ({
+    name:'Notepad', emoji:'📝', color:'#3B82F6', type:'app',
+    review:{ ok:true, category:'tools', categoryName:'Tools', summary:'Jot things down.' },
+    files:{ 'index.html':'<!doctype html><html><body><h1 id="v">version ' + n + '</h1>' +
+      '<!--' + 'x'.repeat(300) + '--></body></html>' },
+  });
+
+  const v1 = await publish(make(1));
+  ok('the first version is published', v1.status === 200, JSON.stringify(v1));
+
+  const { page, ctx, errs } = await newPage(seed());
+  await page.click('#tab-market');
+  await page.waitForSelector('.mk-card', { timeout: 20000 });
+  await page.locator('.mk-card', { hasText:'Notepad' }).locator('.mk-get').click();
+  await page.waitForTimeout(1500);
+  if (await page.isVisible('#sheet-wrap')) {
+    await page.click('#sheet-scrim', { position:{ x:195, y:10 } });
+    await page.waitForTimeout(300);
+  }
+  const installed = await page.evaluate(() =>
+    JSON.parse(localStorage['mini.v1']).apps.find(a => a.name === 'Notepad'));
+  ok('it installs with its line and version', installed?.marketLine && installed.marketVersion === 1,
+     JSON.stringify({ line: installed?.marketLine, v: installed?.marketVersion }));
+  ok('version 1 is what landed', installed.files['index.html'].includes('version 1'));
+
+  // The author ships a fix the same day — an update must not cost the daily slot.
+  const v2 = await publish(make(2));
+  ok('an update does not need a fresh daily slot', v2.status === 200, JSON.stringify(v2));
+  const cat = await marketApi('/api/market/index.json');
+  const row = cat.apps.find(a => a.name === 'Notepad');
+  ok('only the newest version is listed',
+     cat.apps.filter(a => a.name === 'Notepad').length === 1 && row.version === 2,
+     JSON.stringify(cat.apps.map(a => `${a.name} v${a.version}`)));
+  ok('the install count carries over', row.installs >= 1, String(row.installs));
+
+  await page.click('#btn-apps');
+  await page.waitForTimeout(2500);
+  ok('the tile is marked', await page.locator('.app-tile.has-update').first().isVisible());
+
+  await page.locator('.app-tile.has-update').first().dispatchEvent('contextmenu');
+  await page.waitForTimeout(400);
+  ok('the menu offers the update',
+     (await page.textContent('#sheet-body')).includes('Update available'));
+  await page.click('#sheet-body .list-item >> nth=0');
+  await page.waitForTimeout(2500);
+
+  const after = await page.evaluate(() =>
+    JSON.parse(localStorage['mini.v1']).apps.find(a => a.name === 'Notepad'));
+  ok('the installed copy is now version 2', after.marketVersion === 2 &&
+     after.files['index.html'].includes('version 2'),
+     `v${after.marketVersion}`);
   ok('no console errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }

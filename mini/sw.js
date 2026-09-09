@@ -7,7 +7,7 @@
  * `i/<id>-192.png`) and this worker serves them back as if a server had.
  */
 
-const VERSION = 'mini-v5';
+const VERSION = 'mini-v6';
 const SHELL = [
   './', './index.html', './app.css', './manifest.webmanifest',
   './js/main.js', './js/store.js', './js/i18n.js', './js/llm.js', './js/agent.js',
@@ -31,6 +31,20 @@ self.addEventListener('activate', e => {
   })());
 });
 
+/** index.html, re-pointed at one app. */
+async function appShell(id) {
+  const res = (await caches.match('./index.html')) || await fetch('./index.html').catch(() => null);
+  if (!res) return new Response('offline', { status: 503 });
+  const html = (await res.text())
+    .replace(/<head([^>]*)>/i, `<head$1><base href="../../">`)
+    .replace(/<link rel="manifest"[^>]*>/i,
+             `<link rel="manifest" href="m/${id}.webmanifest" id="manifest-link">`)
+    .replace(/<link rel="apple-touch-icon"[^>]*>/i,
+             `<link rel="apple-touch-icon" href="i/${id}-192.png" id="apple-icon">`);
+  return new Response(html, { headers:{ 'Content-Type':'text/html; charset=utf-8',
+                                        'Cache-Control':'no-cache' } });
+}
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -46,7 +60,16 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Navigations always resolve to the shell; routing happens in the page.
+  // A mini app's own address. The shell is the same document, served with a
+  // <base> so its relative URLs still resolve, and with the manifest and icon
+  // pointing at this app — which is what makes the browser install *it*.
+  const app = url.pathname.match(/\/a\/([A-Za-z0-9_-]{2,64})\/?$/);
+  if (req.mode === 'navigate' && app) {
+    e.respondWith(appShell(app[1]));
+    return;
+  }
+
+  // Every other navigation resolves to the shell; routing happens in the page.
   if (req.mode === 'navigate') {
     e.respondWith((async () => {
       try { return await fetch(req); }

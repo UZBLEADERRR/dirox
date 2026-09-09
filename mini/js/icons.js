@@ -32,6 +32,20 @@ export function iconDataUrl(emoji, color, size = 192, image = null) {
 
 async function dataUrlToBlob(url) { return await (await fetch(url)).blob(); }
 
+/** Where the app lives. `<base>` makes this right on a per-app page too. */
+export const appRoot = () => new URL(document.baseURI).pathname.replace(/[^/]*$/, '');
+
+/**
+ * Every mini app gets its own URL, and that is the whole trick.
+ *
+ * Swapping the manifest on one page does not work: the browser has already
+ * decided what this page is, and "add to home screen" adds that — which is why
+ * it kept adding Mini itself. A separate path gives the app its own scope, its
+ * own start_url and its own manifest id, so the browser treats it as a
+ * different application rather than another copy of this one.
+ */
+export const appUrl = (id) => `${appRoot()}a/${id}/`;
+
 /**
  * Gives one mini-app a real, installable identity.
  *
@@ -42,7 +56,8 @@ async function dataUrlToBlob(url) { return await (await fetch(url)).blob(); }
  * and title from the live document, so those are swapped in too.
  */
 export async function applyAppIdentity(app) {
-  const base = location.pathname.replace(/[^/]*$/, '');
+  const base = appRoot();
+  const home = appUrl(app.id);
   const icon192 = iconDataUrl(app.emoji, app.color, 192, app.iconImage);
   const icon512 = iconDataUrl(app.emoji, app.color, 512, app.iconImage);
 
@@ -60,11 +75,11 @@ export async function applyAppIdentity(app) {
     await cache.put(u192, new Response(await dataUrlToBlob(icon192), { headers:{ 'Content-Type':'image/png' } }));
     await cache.put(u512, new Response(await dataUrlToBlob(icon512), { headers:{ 'Content-Type':'image/png' } }));
     await cache.put(uman, new Response(JSON.stringify({
-      // A distinct id is what lets a browser hold several installed apps from
-      // one origin instead of treating each as a reinstall of the last.
-      id: `${base}?app=${app.id}`,
+      // Its own id, start_url and scope: three separate reasons for the
+      // browser to treat this as its own application.
+      id: home,
       name: app.name, short_name: app.name.slice(0, 12),
-      start_url: `${base}?app=${app.id}`, scope: base,
+      start_url: home, scope: home,
       display: 'standalone', orientation: 'portrait',
       background_color: app.color || '#ffffff', theme_color: app.color || '#0b0b0c',
       icons: [
@@ -79,7 +94,8 @@ export async function applyAppIdentity(app) {
 
 /** Puts the shell's own identity back after leaving a mini-app. */
 export function restoreIdentity() {
-  const base = location.pathname.replace(/[^/]*$/, '');
+  if (/\/a\/[^/]+\/$/.test(location.pathname)) return;   // this page IS an app
+  const base = appRoot();
   document.title = 'Mini';
   set('meta[name="apple-mobile-web-app-title"]', 'content', 'Mini');
   set('meta[name="theme-color"]', 'content', getComputedStyle(document.body).backgroundColor || '#0b0b0c');

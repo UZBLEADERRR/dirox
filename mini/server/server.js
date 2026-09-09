@@ -111,7 +111,8 @@ function rebuild() {
       .map(a => ({ id:a.id, name:a.name, emoji:a.emoji, color:a.color, cat:a.cat, catName:a.catName,
                    summary:a.summary, author:a.author, authorUsername:a.authorUsername,
                    type:a.type || 'app', iconImage:a.iconImage || null,
-                   tags:a.tags, size:a.size, v:a.v,
+                   line:a.line || a.id, version:a.version || 1,
+                   tags:a.tags, size:a.size, v:a.v, updatedAt:a.updatedAt || a.createdAt,
                    installs:(state.installs[a.id] || 0) + (a.installs || 0), createdAt:a.createdAt }))
       .sort((x, y) => y.installs - x.installs || y.createdAt - x.createdAt),
   };
@@ -407,6 +408,12 @@ function marketApp(req, res, id) {
   fs.createReadStream(file).pipe(res);
 }
 
+/** Is this a new version of something this person already has in the market? */
+function isUpdateOf(user, payload) {
+  const line = slug(user.username + '-' + String(payload?.name || '').trim().slice(0, LIMITS.name));
+  return state.apps.some(a => a.line === line && a.status === 'live');
+}
+
 /** One publish a day, counted against the account rather than the browser. */
 function quotaState(user) {
   const day = today();
@@ -434,12 +441,18 @@ async function submit(req, res) {
   const ip = clientIp(req);
   const { day, used } = quotaState(user);
   const { ipUsed } = ipState(ip);
-  if (used >= PER_DAY || ipUsed >= PER_IP)
-    return json(res, 429, { error: `${PER_DAY} app per day. Try again tomorrow.` }, CORS);
+  if (ipUsed >= PER_IP)
+    return json(res, 429, { error: 'Too many publishes from this network today.' }, CORS);
 
   let payload;
   try { payload = await readBody(req); }
   catch { return json(res, 413, { error: 'request too large' }, CORS); }
+
+  // The daily limit is about new apps. Publishing a fix to something already
+  // in the market is charged at a third of one, so a bug does not have to
+  // wait until tomorrow.
+  if (used >= PER_DAY && !isUpdateOf(user, payload))
+    return json(res, 429, { error: `${PER_DAY} app per day. Try again tomorrow.` }, CORS);
 
   const v = validate(payload);
   if (v.error) return json(res, 400, { error: v.error }, CORS);
@@ -466,12 +479,23 @@ async function submit(req, res) {
   if (state.apps.some(a => a.id === id))
     return json(res, 409, { error: 'this app is already published' }, CORS);
 
+  // Same person, same name: a new version of something they already published.
+  // Updating should not cost the one new app they get in a day — a bug fix a
+  // user is waiting for is not a new submission — but it is still capped.
+  const line = slug(user.username + '-' + bundle.name);
+  const previous = state.apps.find(a => a.line === line && a.status === 'live');
+  const isUpdate = !!previous;
+  if (isUpdate && used >= PER_DAY + 1)
+    return json(res, 429, { error: 'Too many updates today. Try again tomorrow.' }, CORS);
+
   const row = {
     id,
     name: bundle.name,
     emoji: bundle.emoji,
     color: bundle.color,
     type: ['app', 'course', 'book'].includes(payload.type) ? payload.type : 'app',
+    line,
+    version: (previous?.version || 0) + 1,
     cat: slug(review.category || payload.cat),
     catName: String(review.categoryName || review.category || 'Boshqa').slice(0, 24),
     catIcon: String(review.categoryIcon || '📦').slice(0, 4),
@@ -482,8 +506,9 @@ async function submit(req, res) {
     authorUsername: user.username,
     size: v.size,
     v: hash,
-    installs: 0,
-    createdAt: Date.now(),
+    installs: previous?.installs || 0,
+    createdAt: previous?.createdAt || Date.now(),
+    updatedAt: Date.now(),
     status: MODERATE ? 'pending' : 'live',
     review: { model: String(review.model || '').slice(0, 60), score: Number(review.score) || 0,
               note: String(review.note || '').slice(0, 300) },
@@ -493,9 +518,14 @@ async function submit(req, res) {
   row.iconImage = bundle.iconImage;
   await fsp.writeFile(path.join(APPS, id + '.json'),
     JSON.stringify({ ...row, ...bundle, ip: undefined, authorId: undefined }));
+  if (previous) {
+    previous.status = 'replaced';
+    state.installs[id] = state.installs[previous.id] || 0;   // carry the count over
+  }
   state.apps.unshift(row);
   user.publishDay = day;
-  user.publishCount = used + 1;
+  // An update is charged at a lower rate than a new app.
+  user.publishCount = used + (isUpdate ? 0.34 : 1);
   user.apps = (user.apps || 0) + 1;
   auth.flush();
   state.limits['ip:' + ip] = { day, n: ipUsed + 1 };
@@ -569,7 +599,30 @@ const MIME = {
   '.webmanifest':'application/manifest+json', '.woff2':'font/woff2', '.txt':'text/plain; charset=utf-8',
 };
 
+/**
+ * A mini app's own address, served before a service worker exists.
+ *
+ * Same document, with a <base> so its relative URLs still resolve and with the
+ * manifest and icon pointing at this app — so the browser installs the app the
+ * person is looking at rather than Mini itself.
+ */
+function appShell(res, id) {
+  fs.readFile(path.join(ROOT, 'index.html'), 'utf8', (err, html) => {
+    if (err) return send(res, 500, 'no shell');
+    const out = html
+      .replace(/<head([^>]*)>/i, '<head$1><base href="../../">')
+      .replace(/<link rel="manifest"[^>]*>/i,
+               `<link rel="manifest" href="m/${id}.webmanifest" id="manifest-link">`)
+      .replace(/<link rel="apple-touch-icon"[^>]*>/i,
+               `<link rel="apple-touch-icon" href="i/${id}-192.png" id="apple-icon">`);
+    send(res, 200, out, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+  });
+}
+
 function statik(req, res, p) {
+  const app = p.match(/^\/a\/([A-Za-z0-9_-]{2,64})\/?$/);
+  if (app) return appShell(res, app[1]);
+
   const rel = decodeURIComponent(p).replace(/^\/+/, '') || 'index.html';
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep) && file !== path.join(ROOT, 'index.html'))

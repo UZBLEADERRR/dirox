@@ -8,7 +8,7 @@
  * publishing, not the person hosting.
  */
 
-import { state, marketBase } from './store.js';
+import { state, marketBase, publishApp } from './store.js';
 import { stream } from './llm.js';
 import { runCheck, formatCheck } from './sandbox.js';
 import { authHeaders, session } from './auth.js';
@@ -37,7 +37,10 @@ export async function loadCatalogue({ fresh = false } = {}) {
   if (cached && !fresh && Date.now() - cached.at < 5 * 60_000) return cached.data;
 
   try {
-    const data = await api('/api/market/index.json');
+    // `fresh` has to mean fresh: the catalogue is served with a two-minute
+    // max-age, so without this the browser would answer from its own cache
+    // and an update published a moment ago would stay invisible.
+    const data = await api('/api/market/index.json', fresh ? { cache:'no-cache' } : {});
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), data })); } catch {}
     return data;
   } catch (e) {
@@ -171,3 +174,32 @@ export function markPublished() {
 }
 
 export const isInstalled = marketId => state.apps.some(a => a.marketId === marketId);
+
+/**
+ * Which installed apps the market has a newer version of.
+ *
+ * Versions are tracked by line — the same author republishing under the same
+ * name — because the id carries a content hash and therefore changes with
+ * every edit.
+ */
+export function pendingUpdates(catalogue) {
+  const rows = catalogue?.apps || [];
+  const out = [];
+  for (const app of state.apps) {
+    if (!app.marketLine) continue;
+    const latest = rows.find(r => r.line === app.marketLine);
+    if (latest && (latest.version || 1) > (app.marketVersion || 1)) out.push({ app, latest });
+  }
+  return out;
+}
+
+/** Replaces an installed app's files with the newer published version. */
+export async function updateInstalled(app, latest) {
+  const full = await loadApp(latest.id);
+  return publishApp({
+    id: app.id,
+    name: full.name, emoji: full.emoji, color: full.color, iconImage: full.iconImage,
+    files: full.files, assets: full.assets, deviceAccess: false,
+    marketId: latest.id, marketLine: latest.line, marketVersion: latest.version,
+  });
+}

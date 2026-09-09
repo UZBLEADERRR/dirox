@@ -61,12 +61,103 @@ function bubbleFor(m) {
   if (m.images?.length) {
     wrap.append(el('div', { class:'msg-imgs' }, ...m.images.map(src => el('img', { src }))));
   }
-  if (m.steps?.length) wrap.append(stepsList(m.steps));
-  if (m.content) {
-    wrap.append(el('div', { class:'bubble',
-      ...(m.role === 'user' ? { text:m.content } : { html:md(m.content) }) }));
+  if (m.role === 'user') {
+    if (m.content) wrap.append(el('div', { class:'bubble', text:m.content }));
+    return wrap;
   }
+
+  // What the agent said and what it did, in the order it happened — a step
+  // that comes after a sentence belongs after it, not above the whole reply.
+  if (m.blocks?.length) {
+    const stream = el('div', { class:'stream' });
+    let run = null;
+    for (const b of m.blocks) {
+      if (b.t === 'text') {
+        run ||= el('div', { class:'bubble' });
+        run.innerHTML = md((run.dataset.raw = (run.dataset.raw || '') + b.v));
+        if (!run.parentNode) stream.append(run);
+      } else {
+        run = null;
+        stream.append(stepRow(b));
+      }
+    }
+    wrap.append(stream);
+    return wrap;
+  }
+
+  if (m.steps?.length) wrap.append(stepsList(m.steps));
+  if (m.content) wrap.append(el('div', { class:'bubble', html:md(m.content) }));
   return wrap;
+}
+
+/* --------------------------------------------------------- live stream */
+
+const WORKING_WORDS = [
+  'Diroxing', 'Thinking', 'Wiring things up', 'Drawing', 'Reading the room',
+  'Sketching', 'Cooking', 'Measuring twice', 'Tightening bolts', 'Naming things',
+  'Checking corners', 'Making it fit', 'Sanding the edges', 'Counting pixels',
+];
+
+/** The line that says work is still happening, with a word that keeps moving. */
+function statusLine() {
+  const word = el('span', { class:'sw', text: WORKING_WORDS[0] });
+  const box = el('div', { class:'working' },
+    el('span', { class:'dots' }, el('i'), el('i'), el('i')), word);
+  let i = 0;
+  const timer = setInterval(() => {
+    i = (i + 1) % WORKING_WORDS.length;
+    word.classList.add('out');
+    setTimeout(() => { word.textContent = WORKING_WORDS[i]; word.classList.remove('out'); }, 200);
+  }, 2400);
+  return { el: box, stop() { clearInterval(timer); box.remove(); } };
+}
+
+/**
+ * Collects one assistant turn as an ordered list of text runs and step rows,
+ * appending each to the page as it arrives.
+ */
+function liveStream(container) {
+  const blocks = [];
+  const byId = new Map();
+  let run = null, raw = '', dirty = false;
+
+  const paint = () => { if (dirty && run) { dirty = false; run.innerHTML = md(raw); } };
+  const timer = setInterval(paint, 90);
+
+  return {
+    blocks,
+    text(v) {
+      if (!run) { raw = ''; run = el('div', { class:'bubble' }); container.append(run); }
+      raw += v;
+      dirty = true;
+      const last = blocks[blocks.length - 1];
+      if (last?.t === 'text') last.v += v;
+      else blocks.push({ t:'text', v });
+    },
+    step(st) {
+      paint();
+      run = null;                                  // the next text starts a new run
+      if (st.id != null && byId.has(st.id)) {
+        const b = byId.get(st.id);
+        Object.assign(b, st, { t:'step', running: st.running ?? false });
+        b.el.replaceWith(b.el = stepRow(b));
+        return;
+      }
+      const b = { t:'step', ...st, el: null };
+      b.el = stepRow(b);
+      container.append(b.el);
+      blocks.push(b);
+      if (st.id != null) byId.set(st.id, b);
+    },
+    end() {
+      clearInterval(timer);
+      paint();
+      // The DOM nodes are not worth persisting.
+      return blocks.map(b => b.t === 'text'
+        ? { t:'text', v:b.v }
+        : { t:'step', kind:b.kind, label:b.label, ok:b.ok !== false });
+    },
+  };
 }
 
 function stepsList(steps) {
@@ -220,48 +311,21 @@ export async function send() {
   box.querySelector('.artifact')?.remove();
   box.append(bubbleFor(userMsg));
 
-  // Live assistant bubble
-  const steps = [];
-  const stepsBox = el('div', { class:'steps' });
-  const body = el('div', { class:'bubble' });
-  const typing = el('div', { class:'typing' }, el('i'), el('i'), el('i'));
-  const live = el('div', { class:'msg ai' }, stepsBox, typing, body);
+  // Live assistant turn: text and steps in the order they actually happen.
+  const streamBox = el('div', { class:'stream' });
+  const live = el('div', { class:'msg ai' }, streamBox);
+  const status = statusLine();
+  live.append(status.el);
   box.append(live);
   scrollDown(true);
   setBusy(true);
 
-  let raw = '', dirty = false;
-  const paint = () => {
-    if (!dirty) return;
-    dirty = false;
-    body.innerHTML = md(raw);
-  };
-  const timer = setInterval(paint, 90);
-
-  const byId = new Map();
-  const repaintSteps = () => {
-    stepsBox.innerHTML = '';
-    for (const st of steps) stepsBox.append(stepRow(st));
-  };
+  const turn = liveStream(streamBox);
 
   agent = new Agent({
     settings: s,
-    onDelta(v) { raw += v; dirty = true; typing.hidden = true; scrollDown(); },
-    onStep(st) {
-      // A step with an id belongs to one tool call and is updated in place.
-      if (st.id != null && byId.has(st.id)) {
-        const i = byId.get(st.id);
-        steps[i] = { ...steps[i], ...st, running: st.running ?? false };
-      } else if (st.replace) {
-        const i = steps.findIndex(x => x.kind === st.kind && x.running);
-        if (i >= 0) steps[i] = { ...st, running:false };
-        else steps.push(st);
-      } else {
-        if (st.id != null) byId.set(st.id, steps.length);
-        steps.push(st);
-      }
-      repaintSteps(); scrollDown();
-    },
+    onDelta(v) { turn.text(v); scrollDown(); },
+    onStep(st) { turn.step(st); scrollDown(); },
     onArtifact() { touch(chat); },
     publish(meta) {
       const app = publishApp({ id: chat.appId, ...meta, files:chat.project.files, assets:chat.project.assets });
@@ -285,22 +349,18 @@ export async function send() {
   } catch (e) {
     if (e.name !== 'AbortError') error = e.message || String(e);
   } finally {
-    clearInterval(timer);
-    dirty = true; paint();
-    typing.remove();
+    status.stop();
     setBusy(false);
     agent = null;
   }
 
-  if (error) {
-    steps.push({ kind:'err', label:`${t('error')}: ${error}`, ok:false });
-    repaintSteps();
-  }
+  if (error) turn.step({ kind:'err', label:`${t('error')}: ${error}`, ok:false });
 
+  const blocks = turn.end();
   chat.messages.push({
     role:'assistant',
-    content: raw.trim(),
-    steps: steps.filter(st => st.kind !== 'read' && st.kind !== 'list').map(st => ({ kind:st.kind, label:st.label, ok:st.ok })),
+    content: blocks.filter(b => b.t === 'text').map(b => b.v).join('').trim(),
+    blocks,
   });
   touch(chat);
 

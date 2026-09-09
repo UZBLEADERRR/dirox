@@ -2,9 +2,10 @@
 
 import { state, save, activeChat, newChat, setQuotaHandler, getApp } from './store.js';
 import { t } from './i18n.js';
-import { applyTheme, openSettings, openRolePicker } from './ui/sheets.js';
+import { applyTheme, openSettings, openRolePicker, openAddToHome } from './ui/sheets.js';
+import { appRoot } from './icons.js';
 import { initChat, renderChat, send, stop, attachFiles, addPending } from './ui/chat.js';
-import { initApps, renderApps, openApp, closeApp } from './ui/apps.js';
+import { initApps, renderApps, openApp, closeApp, checkUpdates } from './ui/apps.js';
 import { initMarket, renderMarket, bindMarketControls, openSharedApp, openPublishToMarket } from './ui/market.js';
 import { openDrawer, closeDrawer, renderDrawer, startNewChat } from './ui/drawer.js';
 import { showAuth, hideAuth, bindAuth, openAccount } from './ui/auth.js';
@@ -44,8 +45,20 @@ initApps({
     if (!$('#apps-screen').hidden) { $('#apps-screen').hidden = true; back(); }
     window.__miniRender();
   },
-  leaveBare() { showShell(); },
+  // On a per-app address there is no shell behind this page — go to the root.
+  leaveBare() { pathApp ? location.assign(appRoot()) : showShell(); },
 });
+
+/** Somebody opened an app address for an app this device does not have. */
+function missingApp() {
+  document.body.innerHTML = '';
+  document.body.append(el('div', { class:'empty', style:{ paddingTop:'22vh' } },
+    el('img', { class:'empty-mark', src:'assets/mark.png', alt:'' }),
+    el('h2', { text:'Not installed here' }),
+    el('p', { text:'This app lives on the device that made it. Open Mini to build or install one.' }),
+    el('div', { class:'chips' },
+      el('a', { class:'chip primary', href: appRoot(), text:'Open Mini' }))));
+}
 
 /* ------------------------------------------------------------------ tabs */
 
@@ -63,8 +76,12 @@ function setTab(name) {
 /* ------------------------------------------------------------- deep link */
 
 const params = new URLSearchParams(location.search);
-const deepAppId = params.get('app');      // a mini app pinned to the home screen
+// `/a/<id>/` is a mini app's own installable address; `?app=` is the older
+// form, still honoured for anything already pinned to a home screen.
+const pathApp = location.pathname.match(/\/a\/([A-Za-z0-9_-]{2,64})\/?$/)?.[1] || null;
+const deepAppId = pathApp || params.get('app');
 const deepMarket = params.get('m');       // a shared market link
+const wantsInstall = params.has('install');
 
 function showShell(tab = state.tab || 'chat') {
   $('#boot').hidden = true;
@@ -80,7 +97,14 @@ bindAuth();
 function start() {
   if (deepAppId) {
     const app = getApp(deepAppId);
-    if (app) { $('#boot').hidden = true; openApp(app, { bare:true }); resetHistory(); return; }
+    if (app) {
+      $('#boot').hidden = true;
+      openApp(app, { bare:true });
+      resetHistory();
+      if (wantsInstall) setTimeout(() => openAddToHome(app), 500);
+      return;
+    }
+    if (pathApp) { $('#boot').hidden = true; return missingApp(); }
     history.replaceState(null, '', location.pathname);
     return showShell();
   }
@@ -119,7 +143,7 @@ function afterRefresh(user) {
 
 function showApps(on) {
   $('#apps-screen').hidden = !on;
-  if (on) { renderApps(); push(); }
+  if (on) { renderApps(); checkUpdates(); push(); }
 }
 
 /**
@@ -214,6 +238,28 @@ if (!standalone && !deepAppId && !state.settings.installDismissed) {
 
 /* --------------------------------------------------------- service worker */
 
+/**
+ * Keeping installed copies current.
+ *
+ * The worker takes over as soon as it installs, but the page in front of the
+ * person is still running the old code. Rather than leave them on a stale
+ * version until they happen to close the app, reload once the new worker is
+ * in charge — and go looking for one whenever the app comes back to the
+ * foreground, which for an installed app may be the only time it ever does.
+ */
 if ('serviceWorker' in navigator) {
-  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+
+  addEventListener('load', async () => {
+    const reg = await navigator.serviceWorker.register('sw.js').catch(() => null);
+    if (!reg) return;
+    const look = () => reg.update().catch(() => {});
+    setInterval(look, 30 * 60_000);
+    addEventListener('visibilitychange', () => { if (!document.hidden) look(); });
+  });
 }

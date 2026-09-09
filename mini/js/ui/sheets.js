@@ -3,7 +3,7 @@
 import { state, save, allRoles, uid, storageBytes, deleteApp, publishApp } from '../store.js';
 import { t } from '../i18n.js';
 import { listModels } from '../llm.js';
-import { PALETTE, EMOJIS, iconDataUrl, applyAppIdentity } from '../icons.js';
+import { PALETTE, EMOJIS, iconDataUrl, applyAppIdentity, appUrl } from '../icons.js';
 import { $, el, openSheet, closeSheet, confirmSheet, switchRow, field, toast, fmtBytes,
          ICON, svg, iconTile, appIcon, readImage } from './dom.js';
 import { session } from '../auth.js';
@@ -376,7 +376,8 @@ export function openCode(files) {
 }
 
 /** `draft` = not published yet, so there is nothing to share, pin or delete. */
-export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint, draft = false } = {}) {
+export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint, onUpdate,
+                                   draft = false } = {}) {
   if (draft) return openSheet(() => [
     el('div', { class:'center sheet-hero' },
       appIcon(app),
@@ -393,6 +394,10 @@ export function openAppMenu(app, { onOpen, onEdit, onChanged, onMarket, onPrint,
     el('div', { class:'center sheet-hero' },
       appIcon(app),
       el('div', { style:{ marginTop:'8px', fontWeight:600 }, text:app.name })),
+    onUpdate ? el('button', { class:'list-item', onClick:() => { closeSheet(); onUpdate(); } },
+      iconTile(ICON.download, 'red'), el('span', { class:'txt' },
+        el('b', { text:'Update available' }),
+        el('small', { text:'A newer version is in the market' }))) : null,
     el('button', { class:'list-item', onClick:() => { closeSheet(); onOpen?.(); } },
       iconTile(ICON.play), el('span', { class:'txt' }, el('b', { text:t('open') }))),
     el('button', { class:'list-item', onClick:() => { closeSheet(); onEdit?.(); } },
@@ -436,7 +441,8 @@ export function openAddToHome(app) {
   const ios = /iP(hone|ad|od)/.test(ua) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-  const url = `${location.origin}${location.pathname}?app=${app.id}`;
+  const url = location.origin + appUrl(app.id);
+  const onOwnPage = location.pathname === appUrl(app.id);
 
   const copyRow = () => el('button', { class:'btn', onClick:async () => {
     try { await navigator.clipboard.writeText(url); toast(t('copied')); }
@@ -453,11 +459,24 @@ export function openAddToHome(app) {
       if (standalone) {
         box.append(
           el('div', { class:'note warn',
-            text:'You are inside the installed app, where the browser has no “add to home screen” menu. Open this link in Chrome or Safari, then add it from there.' }),
+            text:'You are inside the installed app, where the browser has no “add to home screen” menu. ' +
+                 'Open this link in Chrome or Safari and add it from there — it now adds ' + app.name +
+                 ', not Mini.' }),
           el('div', { class:'btn-row' },
             copyRow(),
             el('button', { class:'btn primary', onClick:() => { window.open(url, '_blank'); close(); } },
               svg(ICON.external), 'Open in browser')));
+        return;
+      }
+
+      // Off its own page the browser is still looking at Mini, so send it to
+      // the app's address first; the banner reappears there.
+      if (!onOwnPage) {
+        box.append(
+          el('div', { class:'note', text:'One step: open this app on its own page, then add it.' }),
+          el('div', { class:'btn-row' },
+            el('button', { class:'btn primary', onClick:() => location.assign(url + '?install=1') },
+              svg(ICON.external), 'Open ' + app.name)));
         return;
       }
 
@@ -476,8 +495,8 @@ export function openAddToHome(app) {
         el('div', { class:'note', html: ios
           ? 'Tap <b>Share</b> at the bottom of Safari, then <b>Add to Home Screen</b>. ' +
             `It is added as <b>${app.name}</b> with its own icon.`
-          : 'Open the browser menu (<b>⋮</b>, top right) and choose <b>Add to Home screen</b>. ' +
-            `It is added as <b>${app.name}</b> with its own icon.` }),
+          : 'Open the browser menu (<b>⋮</b>, top right) and choose <b>Add to Home screen</b>' +
+            ` or <b>Install app</b>. It is added as <b>${app.name}</b>.` }),
         el('div', { class:'btn-row' }, copyRow()));
     })();
 
